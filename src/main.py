@@ -8,6 +8,11 @@ def welcome():
     print("===================================")
 
 
+# ===================================
+# FACTORY DATA
+# ===================================
+
+
 line_technicians_by_line = {
     "Rovema": [
         "Rovema Technician 1",
@@ -47,9 +52,39 @@ planned_downtime_types = [
 ]
 
 
+# ===================================
+# INPUT VALIDATION
+# ===================================
+
+
+def get_yes_no(question):
+    while True:
+
+        answer = input(
+            question
+        ).strip().lower()
+
+        if answer == "yes":
+            return "yes"
+
+        if answer == "no":
+            return "no"
+
+        print(
+            "Please enter Yes or No."
+        )
+
+
+# ===================================
+# PRODUCTION RUN SETUP
+# ===================================
+
+
 def start_production_run():
     print()
-    print("=== Start Production Run ===")
+    print(
+        "=== Start Production Run ==="
+    )
 
     production_line = input(
         "Production Line: "
@@ -63,15 +98,19 @@ def start_production_run():
     )
 
     if available_technicians:
+
         print(
             "Available Line Technicians:",
             ", ".join(
                 available_technicians
             ),
         )
+
     else:
+
         print(
-            "Warning: Production line not recognised."
+            "Warning: Production line "
+            "not recognised."
         )
 
     line_technician = input(
@@ -96,7 +135,8 @@ def start_production_run():
 
     packs_per_case = int(
         input(
-            "Packs per Case (example 8): "
+            "Packs per Case "
+            "(example 8): "
         )
     )
 
@@ -132,28 +172,59 @@ def start_production_run():
     )
 
     return {
-        "production_line": production_line,
-        "line_technician": line_technician,
-        "shift": shift,
-        "customer": customer,
-        "product": product,
-        "pack_weight": pack_weight,
-        "packs_per_case": packs_per_case,
-        "pack_type": pack_type,
-        "target_speed_ppm": target_speed_ppm,
-        "cases_per_pallet": cases_per_pallet,
-        "pallets_remaining": pallets_remaining,
+        "production_line":
+            production_line,
+
+        "line_technician":
+            line_technician,
+
+        "shift":
+            shift,
+
+        "customer":
+            customer,
+
+        "product":
+            product,
+
+        "pack_weight":
+            pack_weight,
+
+        "packs_per_case":
+            packs_per_case,
+
+        "pack_type":
+            pack_type,
+
+        "target_speed_ppm":
+            target_speed_ppm,
+
+        "cases_per_pallet":
+            cases_per_pallet,
+
+        "pallets_remaining":
+            pallets_remaining,
+
         "previous_run_completed":
             previous_run_completed,
 
-        "total_pallets_completed": 0,
+        "total_pallets_completed":
+            0,
 
-        "potential_overrun_pallets": 0,
+        "potential_overrun_pallets":
+            0,
 
-        "confirmed_overrun_pallets": 0,
+        "confirmed_overrun_pallets":
+            0,
 
-        "events": [],
+        "events":
+            [],
     }
+
+
+# ===================================
+# OPERATIONAL EVENT SYSTEM
+# ===================================
 
 
 def record_event(
@@ -163,12 +234,115 @@ def record_event(
     reported_by,
 ):
     event = {
-        "event_type": event_type,
-        "reason": reason,
-        "reported_by": reported_by,
+        "event_type":
+            event_type,
+
+        "reason":
+            reason,
+
+        "reported_by":
+            reported_by,
     }
 
-    run["events"].append(event)
+    run["events"].append(
+        event
+    )
+
+
+# ===================================
+# ENGINEERING RESPONSE
+# ===================================
+
+
+def engineering_response(run):
+    print()
+    print(
+        "=== Engineering Response ==="
+    )
+
+    print(
+        "Available Engineers:",
+        ", ".join(engineers),
+    )
+
+    engineer = input(
+        "Engineer: "
+    )
+
+    finding = input(
+        "Initial Finding: "
+    )
+
+    action = input(
+        "Action Taken: "
+    )
+
+    while True:
+
+        status = input(
+            "Status "
+            "(Resolved/Ongoing): "
+        ).strip().lower()
+
+        if status in [
+            "resolved",
+            "ongoing",
+        ]:
+            break
+
+        print(
+            "Please enter "
+            "Resolved or Ongoing."
+        )
+
+    engineering_event = {
+        "event_type":
+            "Engineering",
+
+        "reason":
+            finding,
+
+        "reported_by":
+            engineer,
+
+        "action":
+            action,
+
+        "status":
+            status.title(),
+    }
+
+    run["events"].append(
+        engineering_event
+    )
+
+    print()
+    print(
+        "Engineering update recorded."
+    )
+
+    print(
+        f"Engineer: {engineer}"
+    )
+
+    print(
+        f"Finding: {finding}"
+    )
+
+    print(
+        f"Action: {action}"
+    )
+
+    print(
+        f"Status: {status.title()}"
+    )
+
+    return engineering_event
+
+
+# ===================================
+# PRODUCTION CALCULATIONS
+# ===================================
 
 
 def calculate_expected_output(run):
@@ -192,6 +366,11 @@ def calculate_expected_output(run):
         expected_cases_per_hour,
         expected_pallets_per_hour,
     )
+
+
+# ===================================
+# HOURLY UPDATE
+# ===================================
 
 
 def collect_hourly_update(run):
@@ -228,12 +407,14 @@ def collect_hourly_update(run):
     )
 
     if (
-        unplanned_downtime.lower()
+        unplanned_downtime
+        .strip()
+        .lower()
         != "none"
     ):
-        engineer_called = input(
-            "Has an Engineer "
-            "Been Called? "
+
+        engineer_called = get_yes_no(
+            "Has an Engineer Been Called? "
             "(Yes/No): "
         )
 
@@ -253,6 +434,11 @@ def collect_hourly_update(run):
         "engineer_called":
             engineer_called,
     }
+
+
+# ===================================
+# HOURLY PERFORMANCE
+# ===================================
 
 
 def calculate_hour_performance(
@@ -321,6 +507,11 @@ def calculate_hour_performance(
     }
 
 
+# ===================================
+# PRODUCTION RUN PROGRESS
+# ===================================
+
+
 def update_run_progress(
     run,
     hourly_update,
@@ -377,6 +568,11 @@ def update_run_progress(
         run[
             "potential_overrun_pallets"
         ] += pallets_completed
+
+
+# ===================================
+# HOURLY REPORT
+# ===================================
 
 
 def display_hourly_report(
@@ -496,6 +692,11 @@ def display_hourly_report(
     )
 
 
+# ===================================
+# PRODUCTION RUN COMPLETION
+# ===================================
+
+
 def handle_run_completion(run):
     print()
     print(
@@ -509,7 +710,9 @@ def handle_run_completion(run):
     )
 
     if (
-        changeover_type.lower()
+        changeover_type
+        .strip()
+        .lower()
         == "product changeover"
     ):
 
@@ -523,7 +726,9 @@ def handle_run_completion(run):
             run,
             "Changeover",
             "Product Changeover",
-            run["line_technician"],
+            run[
+                "line_technician"
+            ],
         )
 
         print()
@@ -538,7 +743,9 @@ def handle_run_completion(run):
         )
 
     elif (
-        changeover_type.lower()
+        changeover_type
+        .strip()
+        .lower()
         == "customer changeover"
     ):
 
@@ -550,7 +757,9 @@ def handle_run_completion(run):
             run,
             "Changeover",
             "Customer Changeover",
-            run["line_technician"],
+            run[
+                "line_technician"
+            ],
         )
 
         print()
@@ -581,6 +790,47 @@ def handle_run_completion(run):
 
 
 # ===================================
+# EVENT HISTORY DISPLAY
+# ===================================
+
+
+def display_run_events(run):
+    print()
+    print(
+        "=== Production Run Events ==="
+    )
+
+    for event in run["events"]:
+
+        print()
+        print(
+            f"{event['event_type']} | "
+            f"{event['reason']} | "
+            f"Reported by: "
+            f"{event['reported_by']}"
+        )
+
+        if (
+            event["event_type"]
+            == "Engineering"
+        ):
+
+            if "action" in event:
+
+                print(
+                    f"Action: "
+                    f"{event['action']}"
+                )
+
+            if "status" in event:
+
+                print(
+                    f"Status: "
+                    f"{event['status']}"
+                )
+
+
+# ===================================
 # PROGRAM STARTS HERE
 # ===================================
 
@@ -607,7 +857,9 @@ while tracking_finished == False:
         production_run,
         "Production Run",
         "Production Run Started",
-        production_run["line_technician"],
+        production_run[
+            "line_technician"
+        ],
     )
 
 
@@ -667,14 +919,23 @@ while tracking_finished == False:
             production_run,
             "Hourly Update",
             "Hourly Update Received",
-            production_run["line_technician"],
+            production_run[
+                "line_technician"
+            ],
         )
+
+
+        # ===================================
+        # PLANNED DOWNTIME EVENT
+        # ===================================
 
 
         if (
             hourly_update[
                 "planned_downtime"
-            ].lower()
+            ]
+            .strip()
+            .lower()
             != "none"
         ):
 
@@ -690,10 +951,17 @@ while tracking_finished == False:
             )
 
 
+        # ===================================
+        # UNPLANNED DOWNTIME EVENT
+        # ===================================
+
+
         if (
             hourly_update[
                 "unplanned_downtime"
-            ].lower()
+            ]
+            .strip()
+            .lower()
             != "none"
         ):
 
@@ -709,10 +977,17 @@ while tracking_finished == False:
             )
 
 
+        # ===================================
+        # ENGINEERING WORKFLOW
+        # ===================================
+
+
         if (
             hourly_update[
                 "engineer_called"
-            ].lower()
+            ]
+            .strip()
+            .lower()
             == "yes"
         ):
 
@@ -723,6 +998,10 @@ while tracking_finished == False:
                 production_run[
                     "line_technician"
                 ],
+            )
+
+            engineering_response(
+                production_run
             )
 
 
@@ -747,6 +1026,11 @@ while tracking_finished == False:
         )
 
 
+        # ===================================
+        # RUN STILL ACTIVE
+        # ===================================
+
+
         if (
             production_run[
                 "pallets_remaining"
@@ -760,6 +1044,11 @@ while tracking_finished == False:
             )
 
             continue
+
+
+        # ===================================
+        # PLANNED QUANTITY COMPLETE
+        # ===================================
 
 
         if (
@@ -779,15 +1068,18 @@ while tracking_finished == False:
                 f"{production_run['potential_overrun_pallets']}"
             )
 
-            run_confirmation = input(
-                "Is the production run "
-                "finished? "
-                "(Yes/No): "
+
+            run_confirmation = (
+                get_yes_no(
+                    "Is the production run "
+                    "finished? "
+                    "(Yes/No): "
+                )
             )
 
 
             if (
-                run_confirmation.lower()
+                run_confirmation
                 == "no"
             ):
 
@@ -807,7 +1099,7 @@ while tracking_finished == False:
 
 
             if (
-                run_confirmation.lower()
+                run_confirmation
                 == "yes"
             ):
 
@@ -854,18 +1146,9 @@ while tracking_finished == False:
     )
 
 
-    print()
-    print(
-        "=== Production Run Events ==="
+    display_run_events(
+        production_run
     )
-
-    for event in production_run["events"]:
-        print(
-            f"{event['event_type']} | "
-            f"{event['reason']} | "
-            f"Reported by: "
-            f"{event['reported_by']}"
-        )
 
 
     # ===================================
@@ -873,27 +1156,28 @@ while tracking_finished == False:
     # ===================================
 
 
-    next_run = input(
+    next_run = get_yes_no(
         "Start another Production Run? "
         "(Yes/No): "
     )
 
 
     if (
-        next_run.lower()
+        next_run
         == "yes"
     ):
 
         print()
         print(
-            "Preparing next Production Run..."
+            "Preparing next "
+            "Production Run..."
         )
 
         continue
 
 
     if (
-        next_run.lower()
+        next_run
         == "no"
     ):
 
@@ -907,5 +1191,6 @@ while tracking_finished == False:
 
 print()
 print(
-    "=== TonnageFlow Pulse Session Closed ==="
+    "=== TonnageFlow Pulse "
+    "Session Closed ==="
 )
