@@ -132,28 +132,17 @@ def start_production_run():
     )
 
     return {
-        "production_line":
-            production_line,
-        "line_technician":
-            line_technician,
-        "shift":
-            shift,
-        "customer":
-            customer,
-        "product":
-            product,
-        "pack_weight":
-            pack_weight,
-        "packs_per_case":
-            packs_per_case,
-        "pack_type":
-            pack_type,
-        "target_speed_ppm":
-            target_speed_ppm,
-        "cases_per_pallet":
-            cases_per_pallet,
-        "pallets_remaining":
-            pallets_remaining,
+        "production_line": production_line,
+        "line_technician": line_technician,
+        "shift": shift,
+        "customer": customer,
+        "product": product,
+        "pack_weight": pack_weight,
+        "packs_per_case": packs_per_case,
+        "pack_type": pack_type,
+        "target_speed_ppm": target_speed_ppm,
+        "cases_per_pallet": cases_per_pallet,
+        "pallets_remaining": pallets_remaining,
         "previous_run_completed":
             previous_run_completed,
 
@@ -162,7 +151,24 @@ def start_production_run():
         "potential_overrun_pallets": 0,
 
         "confirmed_overrun_pallets": 0,
+
+        "events": [],
     }
+
+
+def record_event(
+    run,
+    event_type,
+    reason,
+    reported_by,
+):
+    event = {
+        "event_type": event_type,
+        "reason": reason,
+        "reported_by": reported_by,
+    }
+
+    run["events"].append(event)
 
 
 def calculate_expected_output(run):
@@ -325,14 +331,11 @@ def update_run_progress(
         ]
     )
 
-    # Planned production still remains.
     if (
         run["pallets_remaining"]
         > 0
     ):
 
-        # Everything produced belongs
-        # to the planned job.
         if (
             pallets_completed
             <= run["pallets_remaining"]
@@ -346,8 +349,6 @@ def update_run_progress(
                 "pallets_remaining"
             ] -= pallets_completed
 
-        # Planned quantity is completed
-        # during this hourly period.
         else:
 
             planned_pallets = run[
@@ -371,8 +372,6 @@ def update_run_progress(
                 "potential_overrun_pallets"
             ] += potential_overrun
 
-    # Planned quantity was already zero
-    # before this hourly update.
     else:
 
         run[
@@ -520,6 +519,13 @@ def handle_run_completion(run):
             "potential_overrun_pallets"
         ]
 
+        record_event(
+            run,
+            "Changeover",
+            "Product Changeover",
+            run["line_technician"],
+        )
+
         print()
         print(
             "Product Changeover"
@@ -539,6 +545,13 @@ def handle_run_completion(run):
         run[
             "confirmed_overrun_pallets"
         ] = 0
+
+        record_event(
+            run,
+            "Changeover",
+            "Customer Changeover",
+            run["line_technician"],
+        )
 
         print()
         print(
@@ -587,6 +600,14 @@ while tracking_finished == False:
 
     production_run = (
         start_production_run()
+    )
+
+
+    record_event(
+        production_run,
+        "Production Run",
+        "Production Run Started",
+        production_run["line_technician"],
     )
 
 
@@ -641,6 +662,70 @@ while tracking_finished == False:
             )
         )
 
+
+        record_event(
+            production_run,
+            "Hourly Update",
+            "Hourly Update Received",
+            production_run["line_technician"],
+        )
+
+
+        if (
+            hourly_update[
+                "planned_downtime"
+            ].lower()
+            != "none"
+        ):
+
+            record_event(
+                production_run,
+                "Planned Downtime",
+                hourly_update[
+                    "planned_downtime"
+                ],
+                production_run[
+                    "line_technician"
+                ],
+            )
+
+
+        if (
+            hourly_update[
+                "unplanned_downtime"
+            ].lower()
+            != "none"
+        ):
+
+            record_event(
+                production_run,
+                "Unplanned Downtime",
+                hourly_update[
+                    "unplanned_downtime"
+                ],
+                production_run[
+                    "line_technician"
+                ],
+            )
+
+
+        if (
+            hourly_update[
+                "engineer_called"
+            ].lower()
+            == "yes"
+        ):
+
+            record_event(
+                production_run,
+                "Engineering",
+                "Engineer Called",
+                production_run[
+                    "line_technician"
+                ],
+            )
+
+
         hour_performance = (
             calculate_hour_performance(
                 production_run,
@@ -648,10 +733,12 @@ while tracking_finished == False:
             )
         )
 
+
         update_run_progress(
             production_run,
             hourly_update,
         )
+
 
         display_hourly_report(
             production_run,
@@ -660,7 +747,6 @@ while tracking_finished == False:
         )
 
 
-        # Planned quantity still remains.
         if (
             production_run[
                 "pallets_remaining"
@@ -676,7 +762,6 @@ while tracking_finished == False:
             continue
 
 
-        # Planned quantity has reached zero.
         if (
             production_run[
                 "pallets_remaining"
@@ -701,7 +786,6 @@ while tracking_finished == False:
             )
 
 
-            # Run continues.
             if (
                 run_confirmation.lower()
                 == "no"
@@ -722,11 +806,19 @@ while tracking_finished == False:
                 continue
 
 
-            # Technician confirms run ended.
             if (
                 run_confirmation.lower()
                 == "yes"
             ):
+
+                record_event(
+                    production_run,
+                    "Production Run",
+                    "Production Run Finished",
+                    production_run[
+                        "line_technician"
+                    ],
+                )
 
                 run_finished = True
 
@@ -760,6 +852,20 @@ while tracking_finished == False:
         f"Confirmed Overrun Pallets: "
         f"{production_run['confirmed_overrun_pallets']}"
     )
+
+
+    print()
+    print(
+        "=== Production Run Events ==="
+    )
+
+    for event in production_run["events"]:
+        print(
+            f"{event['event_type']} | "
+            f"{event['reason']} | "
+            f"Reported by: "
+            f"{event['reported_by']}"
+        )
 
 
     # ===================================
