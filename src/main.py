@@ -51,73 +51,124 @@ def start_production_run():
     print()
     print("=== Start Production Run ===")
 
-    production_line = input("Production Line: ")
+    production_line = input(
+        "Production Line: "
+    )
 
-    available_technicians = line_technicians_by_line.get(
-        production_line,
-        [],
+    available_technicians = (
+        line_technicians_by_line.get(
+            production_line,
+            [],
+        )
     )
 
     if available_technicians:
         print(
             "Available Line Technicians:",
-            ", ".join(available_technicians),
+            ", ".join(
+                available_technicians
+            ),
         )
     else:
-        print("Warning: Production line not recognised.")
+        print(
+            "Warning: Production line not recognised."
+        )
 
-    line_technician = input("Line Technician: ")
-    shift = input("Shift: ")
-    customer = input("Customer: ")
-    product = input("Product: ")
+    line_technician = input(
+        "Line Technician: "
+    )
 
-    pack_weight = input("Pack Weight (example 1kg): ")
+    shift = input(
+        "Shift: "
+    )
+
+    customer = input(
+        "Customer: "
+    )
+
+    product = input(
+        "Product: "
+    )
+
+    pack_weight = input(
+        "Pack Weight (example 1kg): "
+    )
 
     packs_per_case = int(
-        input("Packs per Case (example 8): ")
+        input(
+            "Packs per Case (example 8): "
+        )
     )
 
     pack_type = input(
-        "Pack Type (example Pillow Pack): "
+        "Pack Type "
+        "(example Pillow Pack): "
     )
 
     target_speed_ppm = float(
-        input("Target Speed - Packs per Minute: ")
+        input(
+            "Target Speed - "
+            "Packs per Minute: "
+        )
     )
 
     cases_per_pallet = int(
-        input("Cases per Pallet: ")
+        input(
+            "Cases per Pallet: "
+        )
     )
 
     pallets_remaining = int(
-        input("Pallets Remaining on Job: ")
+        input(
+            "Pallets Remaining on Job: "
+        )
     )
 
     previous_run_completed = int(
-        input("Previous Run Pallets Completed: ")
+        input(
+            "Previous Run "
+            "Pallets Completed: "
+        )
     )
 
     return {
-        "production_line": production_line,
-        "line_technician": line_technician,
-        "shift": shift,
-        "customer": customer,
-        "product": product,
-        "pack_weight": pack_weight,
-        "packs_per_case": packs_per_case,
-        "pack_type": pack_type,
-        "target_speed_ppm": target_speed_ppm,
-        "cases_per_pallet": cases_per_pallet,
-        "pallets_remaining": pallets_remaining,
-        "previous_run_completed": previous_run_completed,
+        "production_line":
+            production_line,
+        "line_technician":
+            line_technician,
+        "shift":
+            shift,
+        "customer":
+            customer,
+        "product":
+            product,
+        "pack_weight":
+            pack_weight,
+        "packs_per_case":
+            packs_per_case,
+        "pack_type":
+            pack_type,
+        "target_speed_ppm":
+            target_speed_ppm,
+        "cases_per_pallet":
+            cases_per_pallet,
+        "pallets_remaining":
+            pallets_remaining,
+        "previous_run_completed":
+            previous_run_completed,
+
         "total_pallets_completed": 0,
-        "overrun_pallets": 0,
+
+        "potential_overrun_pallets": 0,
+
+        "confirmed_overrun_pallets": 0,
     }
 
 
 def calculate_expected_output(run):
     expected_packs_per_hour = (
-        run["target_speed_ppm"] * 60
+        run["target_speed_ppm"]
+        * 60
     )
 
     expected_cases_per_hour = (
@@ -139,48 +190,76 @@ def calculate_expected_output(run):
 
 def collect_hourly_update(run):
     print()
-    print("=== Hourly Production Update ===")
+    print(
+        "=== Hourly Production Update ==="
+    )
 
     oee = float(
-        input("OEE (%): ")
+        input(
+            "OEE (%): "
+        )
     )
 
     pallets_completed_this_hour = int(
-        input("Pallets Completed This Hour: ")
+        input(
+            "Pallets Completed "
+            "This Hour: "
+        )
     )
 
     planned_downtime = input(
-        "Planned Downtime or None: "
+        "Planned Downtime "
+        "or None: "
     )
 
     unplanned_downtime = input(
-        "Unplanned Downtime or None: "
+        "Unplanned Downtime "
+        "or None: "
     )
 
-    engineer_called = "Not Required"
+    engineer_called = (
+        "Not Required"
+    )
 
-    if unplanned_downtime.lower() != "none":
+    if (
+        unplanned_downtime.lower()
+        != "none"
+    ):
         engineer_called = input(
-            "Has an Engineer Been Called? (Yes/No): "
+            "Has an Engineer "
+            "Been Called? "
+            "(Yes/No): "
         )
 
     return {
-        "oee": oee,
+        "oee":
+            oee,
+
         "pallets_completed_this_hour":
             pallets_completed_this_hour,
-        "planned_downtime": planned_downtime,
+
+        "planned_downtime":
+            planned_downtime,
+
         "unplanned_downtime":
             unplanned_downtime,
-        "engineer_called": engineer_called,
+
+        "engineer_called":
+            engineer_called,
     }
 
 
-def calculate_hour_performance(run, hourly_update):
+def calculate_hour_performance(
+    run,
+    hourly_update,
+):
     (
         expected_packs,
         expected_cases,
         expected_pallets,
-    ) = calculate_expected_output(run)
+    ) = calculate_expected_output(
+        run
+    )
 
     actual_pallets = hourly_update[
         "pallets_completed_this_hour"
@@ -196,7 +275,10 @@ def calculate_hour_performance(run, hourly_update):
         * run["packs_per_case"]
     )
 
-    lost_packs = expected_packs - actual_packs
+    lost_packs = (
+        expected_packs
+        - actual_packs
+    )
 
     if lost_packs < 0:
         lost_packs = 0
@@ -207,33 +289,95 @@ def calculate_hour_performance(run, hourly_update):
     )
 
     return {
-        "expected_packs": expected_packs,
-        "expected_cases": expected_cases,
-        "expected_pallets": expected_pallets,
-        "actual_packs": actual_packs,
-        "actual_cases": actual_cases,
-        "actual_pallets": actual_pallets,
-        "lost_packs": lost_packs,
+        "expected_packs":
+            expected_packs,
+
+        "expected_cases":
+            expected_cases,
+
+        "expected_pallets":
+            expected_pallets,
+
+        "actual_packs":
+            actual_packs,
+
+        "actual_cases":
+            actual_cases,
+
+        "actual_pallets":
+            actual_pallets,
+
+        "lost_packs":
+            lost_packs,
+
         "estimated_lost_minutes":
             estimated_lost_minutes,
     }
 
 
-def update_run_progress(run, hourly_update):
-    pallets_completed = hourly_update[
-        "pallets_completed_this_hour"
-    ]
-
-    run["total_pallets_completed"] += (
-        pallets_completed
+def update_run_progress(
+    run,
+    hourly_update,
+):
+    pallets_completed = (
+        hourly_update[
+            "pallets_completed_this_hour"
+        ]
     )
 
-    run["pallets_remaining"] -= (
-        pallets_completed
-    )
+    # Planned production still remains.
+    if (
+        run["pallets_remaining"]
+        > 0
+    ):
 
-    if run["pallets_remaining"] < 0:
-        run["pallets_remaining"] = 0
+        # Everything produced belongs
+        # to the planned job.
+        if (
+            pallets_completed
+            <= run["pallets_remaining"]
+        ):
+
+            run[
+                "total_pallets_completed"
+            ] += pallets_completed
+
+            run[
+                "pallets_remaining"
+            ] -= pallets_completed
+
+        # Planned quantity is completed
+        # during this hourly period.
+        else:
+
+            planned_pallets = run[
+                "pallets_remaining"
+            ]
+
+            potential_overrun = (
+                pallets_completed
+                - planned_pallets
+            )
+
+            run[
+                "total_pallets_completed"
+            ] += planned_pallets
+
+            run[
+                "pallets_remaining"
+            ] = 0
+
+            run[
+                "potential_overrun_pallets"
+            ] += potential_overrun
+
+    # Planned quantity was already zero
+    # before this hourly update.
+    else:
+
+        run[
+            "potential_overrun_pallets"
+        ] += pallets_completed
 
 
 def display_hourly_report(
@@ -242,7 +386,9 @@ def display_hourly_report(
     performance,
 ):
     print()
-    print("=== TonnageFlow Pulse ===")
+    print(
+        "=== TonnageFlow Pulse ==="
+    )
 
     print(
         f"Production Line: "
@@ -250,7 +396,8 @@ def display_hourly_report(
     )
 
     print(
-        f"Product: {run['product']}"
+        f"Product: "
+        f"{run['product']}"
     )
 
     print(
@@ -260,20 +407,24 @@ def display_hourly_report(
     )
 
     print(
-        f"Customer: {run['customer']}"
+        f"Customer: "
+        f"{run['customer']}"
     )
 
     print(
-        f"OEE: {hourly_update['oee']}%"
+        f"OEE: "
+        f"{hourly_update['oee']}%"
     )
 
     print(
-        f"Pallets Completed This Hour: "
+        f"Pallets Completed "
+        f"This Hour: "
         f"{hourly_update['pallets_completed_this_hour']}"
     )
 
     print(
-        f"Total Pallets Completed This Run: "
+        f"Planned Pallets "
+        f"Completed This Run: "
         f"{run['total_pallets_completed']}"
     )
 
@@ -282,26 +433,37 @@ def display_hourly_report(
         f"{run['pallets_remaining']}"
     )
 
+    print(
+        f"Potential Overrun Pallets: "
+        f"{run['potential_overrun_pallets']}"
+    )
+
     print()
-    print("--- Expected vs Actual ---")
+    print(
+        "--- Expected vs Actual ---"
+    )
 
     print(
-        f"Expected Packs This Hour: "
+        f"Expected Packs "
+        f"This Hour: "
         f"{performance['expected_packs']:.0f}"
     )
 
     print(
-        f"Actual Packs This Hour: "
+        f"Actual Packs "
+        f"This Hour: "
         f"{performance['actual_packs']}"
     )
 
     print(
-        f"Expected Pallets This Hour: "
+        f"Expected Pallets "
+        f"This Hour: "
         f"{performance['expected_pallets']:.2f}"
     )
 
     print(
-        f"Actual Pallets This Hour: "
+        f"Actual Pallets "
+        f"This Hour: "
         f"{performance['actual_pallets']}"
     )
 
@@ -311,11 +473,14 @@ def display_hourly_report(
     )
 
     print(
-        f"Estimated Lost Production Time: "
-        f"{performance['estimated_lost_minutes']:.1f} minutes"
+        f"Estimated Lost "
+        f"Production Time: "
+        f"{performance['estimated_lost_minutes']:.1f} "
+        f"minutes"
     )
 
     print()
+
     print(
         f"Planned Downtime: "
         f"{hourly_update['planned_downtime']}"
@@ -333,112 +498,308 @@ def display_hourly_report(
 
 
 def handle_run_completion(run):
-    if run["pallets_remaining"] > 0:
-        return
-
     print()
-    print("=== Planned Job Quantity Complete ===")
+    print(
+        "=== Production Run Completion ==="
+    )
 
     changeover_type = input(
-        "Next run is Product Changeover "
+        "Next run is "
+        "Product Changeover "
         "or Customer Changeover? "
     )
 
-    if changeover_type.lower() == "product changeover":
+    if (
+        changeover_type.lower()
+        == "product changeover"
+    ):
 
-        extra_pallets = int(
-            input(
-                "Extra Pallets Produced "
-                "While Emptying Product: "
-            )
-        )
-
-        run["overrun_pallets"] = extra_pallets
+        run[
+            "confirmed_overrun_pallets"
+        ] = run[
+            "potential_overrun_pallets"
+        ]
 
         print()
-        print("Product Changeover")
         print(
-            f"Overrun Recorded: "
-            f"{run['overrun_pallets']} Pallets"
+            "Product Changeover"
         )
 
-    elif changeover_type.lower() == "customer changeover":
+        print(
+            f"Confirmed Overrun: "
+            f"{run['confirmed_overrun_pallets']} "
+            f"Pallets"
+        )
 
-        run["overrun_pallets"] = 0
+    elif (
+        changeover_type.lower()
+        == "customer changeover"
+    ):
+
+        run[
+            "confirmed_overrun_pallets"
+        ] = 0
 
         print()
-        print("Customer Changeover")
-        print("Same product continues.")
-        print("No overrun recorded.")
+        print(
+            "Customer Changeover"
+        )
+
+        print(
+            "Same product continues."
+        )
+
+        print(
+            "Potential extra pallets "
+            "may belong to the next "
+            "customer run."
+        )
+
+        print(
+            "No overrun confirmed."
+        )
 
     else:
+
         print(
-            "Changeover type not recognised."
+            "Changeover type "
+            "not recognised."
         )
+
+
+# ===================================
+# PROGRAM STARTS HERE
+# ===================================
 
 
 welcome()
 
-production_run = start_production_run()
+
+tracking_finished = False
 
 
-(
-    expected_packs,
-    expected_cases,
-    expected_pallets,
-) = calculate_expected_output(
-    production_run
-)
+# ===================================
+# PRODUCTION RUN SESSION LOOP
+# ===================================
+
+
+while tracking_finished == False:
+
+    production_run = (
+        start_production_run()
+    )
+
+
+    (
+        expected_packs,
+        expected_cases,
+        expected_pallets,
+    ) = calculate_expected_output(
+        production_run
+    )
+
+
+    print()
+    print(
+        "=== Production Model ==="
+    )
+
+    print(
+        f"Expected Packs per Hour: "
+        f"{expected_packs:.0f}"
+    )
+
+    print(
+        f"Expected Cases per Hour: "
+        f"{expected_cases:.0f}"
+    )
+
+    print(
+        f"Expected Pallets per Hour: "
+        f"{expected_pallets:.2f}"
+    )
+
+    print(
+        f"Starting Pallets Remaining: "
+        f"{production_run['pallets_remaining']}"
+    )
+
+
+    # ===================================
+    # HOURLY UPDATE LOOP
+    # ===================================
+
+
+    run_finished = False
+
+
+    while run_finished == False:
+
+        hourly_update = (
+            collect_hourly_update(
+                production_run
+            )
+        )
+
+        hour_performance = (
+            calculate_hour_performance(
+                production_run,
+                hourly_update,
+            )
+        )
+
+        update_run_progress(
+            production_run,
+            hourly_update,
+        )
+
+        display_hourly_report(
+            production_run,
+            hourly_update,
+            hour_performance,
+        )
+
+
+        # Planned quantity still remains.
+        if (
+            production_run[
+                "pallets_remaining"
+            ]
+            > 0
+        ):
+
+            print()
+            print(
+                "Production run continues."
+            )
+
+            continue
+
+
+        # Planned quantity has reached zero.
+        if (
+            production_run[
+                "pallets_remaining"
+            ]
+            == 0
+        ):
+
+            print()
+            print(
+                "Planned quantity complete."
+            )
+
+            print(
+                f"Potential Overrun Pallets: "
+                f"{production_run['potential_overrun_pallets']}"
+            )
+
+            run_confirmation = input(
+                "Is the production run "
+                "finished? "
+                "(Yes/No): "
+            )
+
+
+            # Run continues.
+            if (
+                run_confirmation.lower()
+                == "no"
+            ):
+
+                print()
+                print(
+                    "Production run "
+                    "remains active."
+                )
+
+                print(
+                    "Any additional pallets "
+                    "will be recorded as "
+                    "potential overrun."
+                )
+
+                continue
+
+
+            # Technician confirms run ended.
+            if (
+                run_confirmation.lower()
+                == "yes"
+            ):
+
+                run_finished = True
+
+
+    # ===================================
+    # HOURLY UPDATE LOOP ENDS
+    # ===================================
+
+
+    handle_run_completion(
+        production_run
+    )
+
+
+    print()
+    print(
+        "=== Production Run Closed ==="
+    )
+
+    print(
+        f"Planned Pallets Completed: "
+        f"{production_run['total_pallets_completed']}"
+    )
+
+    print(
+        f"Potential Overrun Pallets: "
+        f"{production_run['potential_overrun_pallets']}"
+    )
+
+    print(
+        f"Confirmed Overrun Pallets: "
+        f"{production_run['confirmed_overrun_pallets']}"
+    )
+
+
+    # ===================================
+    # NEXT PRODUCTION RUN
+    # ===================================
+
+
+    next_run = input(
+        "Start another Production Run? "
+        "(Yes/No): "
+    )
+
+
+    if (
+        next_run.lower()
+        == "yes"
+    ):
+
+        print()
+        print(
+            "Preparing next Production Run..."
+        )
+
+        continue
+
+
+    if (
+        next_run.lower()
+        == "no"
+    ):
+
+        tracking_finished = True
+
+
+# ===================================
+# PRODUCTION RUN SESSION LOOP ENDS
+# ===================================
 
 
 print()
-print("=== Production Model ===")
-
 print(
-    f"Expected Packs per Hour: "
-    f"{expected_packs:.0f}"
-)
-
-print(
-    f"Expected Cases per Hour: "
-    f"{expected_cases:.0f}"
-)
-
-print(
-    f"Expected Pallets per Hour: "
-    f"{expected_pallets:.2f}"
-)
-
-print(
-    f"Starting Pallets Remaining: "
-    f"{production_run['pallets_remaining']}"
-)
-
-
-hourly_update = collect_hourly_update(
-    production_run
-)
-
-
-hour_performance = calculate_hour_performance(
-    production_run,
-    hourly_update,
-)
-
-
-update_run_progress(
-    production_run,
-    hourly_update,
-)
-
-
-display_hourly_report(
-    production_run,
-    hourly_update,
-    hour_performance,
-)
-
-
-handle_run_completion(
-    production_run
+    "=== TonnageFlow Pulse Session Closed ==="
 )
