@@ -1,6 +1,11 @@
-# TonnageFlow Pulse - Production Run Tracker
+# ==========================================================
+# TONNAGEFLOW PULSE
+# Production Run Tracker
+# ==========================================================
 
 from datetime import datetime
+
+from database import save_production_run
 
 
 # ==========================================================
@@ -9,6 +14,10 @@ from datetime import datetime
 
 UNEXPLAINED_LOSS_MINUTES_THRESHOLD = 10.0
 
+
+# ==========================================================
+# FACTORY DATA
+# ==========================================================
 
 line_technicians_by_line = {
     "Rovema": [
@@ -41,17 +50,49 @@ engineers = [
 ]
 
 
+# ==========================================================
+# VALID PACK SIZES BY LINE
+# ==========================================================
+
+pack_sizes_by_line = {
+    "Rovema": {
+        "500g": 0.500,
+        "1kg": 1.000,
+    },
+
+    "GIC": {
+        "1kg": 1.000,
+        "4kg": 4.000,
+    },
+
+    "Guill": {
+        "500g": 0.500,
+        "1kg": 1.000,
+        "2kg": 2.000,
+    },
+}
+
+
 planned_downtime_types = [
     "None",
     "Label Change",
     "Film Change",
     "CCP Check",
-    "Changeover",
+    "Product Changeover",
+    "Size Changeover",
+    "Customer Changeover",
+]
+
+
+changeover_types = [
+    "Product Changeover",
+    "Size Changeover",
+    "Customer Changeover",
 ]
 
 
 # ==========================================================
-# DISPLAY
+# DISPLAY HELPERS
 # ==========================================================
 
 
@@ -64,9 +105,7 @@ def welcome():
 
 def section(title):
     print()
-    print(
-        f"=== {title} ==="
-    )
+    print(f"=== {title} ===")
 
 
 # ==========================================================
@@ -92,7 +131,6 @@ def current_timestamp():
 
 def get_required_text(question):
     while True:
-
         value = input(
             question
         ).strip()
@@ -107,7 +145,6 @@ def get_required_text(question):
 
 def get_yes_no(question):
     while True:
-
         answer = input(
             question
         ).strip().lower()
@@ -131,7 +168,6 @@ def get_yes_no(question):
 
 def get_status(question):
     while True:
-
         status = input(
             question
         ).strip().lower()
@@ -153,7 +189,6 @@ def get_int(
     maximum=None,
 ):
     while True:
-
         value = input(
             question
         ).strip()
@@ -164,35 +199,29 @@ def get_int(
             )
 
         except ValueError:
-
             print(
                 "Please enter a whole number."
             )
-
             continue
 
         if (
             minimum is not None
             and number < minimum
         ):
-
             print(
                 f"Please enter a number "
                 f"of at least {minimum}."
             )
-
             continue
 
         if (
             maximum is not None
             and number > maximum
         ):
-
             print(
                 f"Please enter a number "
                 f"no greater than {maximum}."
             )
-
             continue
 
         return number
@@ -204,7 +233,6 @@ def get_float(
     maximum=None,
 ):
     while True:
-
         value = input(
             question
         ).strip()
@@ -215,35 +243,29 @@ def get_float(
             )
 
         except ValueError:
-
             print(
                 "Please enter a valid number."
             )
-
             continue
 
         if (
             minimum is not None
             and number < minimum
         ):
-
             print(
                 f"Please enter a number "
                 f"of at least {minimum}."
             )
-
             continue
 
         if (
             maximum is not None
             and number > maximum
         ):
-
             print(
                 f"Please enter a number "
                 f"no greater than {maximum}."
             )
-
             continue
 
         return number
@@ -254,7 +276,6 @@ def choose_option(
     options,
 ):
     while True:
-
         print()
         print(
             title
@@ -267,7 +288,6 @@ def choose_option(
             options,
             start=1,
         ):
-
             print(
                 f"{number} - {option}"
             )
@@ -277,7 +297,6 @@ def choose_option(
         ).strip()
 
         if answer.isdigit():
-
             selected_number = int(
                 answer
             )
@@ -287,18 +306,15 @@ def choose_option(
                 <= selected_number
                 <= len(options)
             ):
-
                 return options[
                     selected_number - 1
                 ]
 
         for option in options:
-
             if (
                 answer.lower()
                 == option.lower()
             ):
-
                 return option
 
         print(
@@ -310,30 +326,18 @@ def choose_option(
 def get_engineering_text(
     question,
 ):
-    """
-    Engineering findings and actions
-    are free text.
-
-    If the engineer accidentally enters
-    only 'Ongoing' or 'Resolved', Pulse
-    warns them because those words are
-    usually intended for the status field.
-    """
-
     while True:
-
         value = get_required_text(
             question
         )
 
         if (
-            value.strip().lower()
+            value.lower()
             not in (
                 "ongoing",
                 "resolved",
             )
         ):
-
             return value
 
         print()
@@ -358,7 +362,6 @@ def get_engineering_text(
 
 
 def get_run_activity():
-
     activity = choose_option(
         "=== Production Run Activity ===",
         [
@@ -368,25 +371,17 @@ def get_run_activity():
         ],
     )
 
-    if (
-        activity
-        == "Machine Down"
-    ):
-
+    if activity == "Machine Down":
         return "machine_down"
 
-    if (
-        activity
-        == "Hourly Update"
-    ):
-
+    if activity == "Hourly Update":
         return "hourly_update"
 
     return "show_faults"
 
 
 # ==========================================================
-# EVENT SYSTEM
+# EVENTS
 # ==========================================================
 
 
@@ -397,7 +392,6 @@ def record_event(
     reported_by,
     **extra_data,
 ):
-
     event = {
         "timestamp":
             current_timestamp(),
@@ -426,12 +420,11 @@ def record_event(
 
 
 # ==========================================================
-# PRODUCTION RUN SETUP
+# RUN SETUP
 # ==========================================================
 
 
 def collect_run_setup():
-
     section(
         "Start Production Run"
     )
@@ -462,21 +455,38 @@ def collect_run_setup():
         "Customer: "
     )
 
-    # Product remains free text for MVP.
-    # The confirmation screen below protects
-    # against accidental shifted entries.
     product = get_required_text(
         "Product: "
     )
 
-    pack_weight = get_required_text(
-        "Pack Weight "
-        "(example 1kg): "
+    # ------------------------------------------------------
+    # PACK SIZE IS CONTROLLED BY PRODUCTION LINE
+    # ------------------------------------------------------
+
+    available_pack_sizes = list(
+        pack_sizes_by_line[
+            production_line
+        ].keys()
+    )
+
+    pack_weight = (
+        choose_option(
+            f"Select Pack Size - "
+            f"{production_line}",
+            available_pack_sizes,
+        )
+    )
+
+    pack_weight_kg = (
+        pack_sizes_by_line[
+            production_line
+        ][
+            pack_weight
+        ]
     )
 
     packs_per_case = get_int(
-        "Packs per Case "
-        "(example 8): ",
+        "Packs per Case: ",
         minimum=1,
     )
 
@@ -526,6 +536,9 @@ def collect_run_setup():
         "pack_weight":
             pack_weight,
 
+        "pack_weight_kg":
+            pack_weight_kg,
+
         "packs_per_case":
             packs_per_case,
 
@@ -549,7 +562,6 @@ def collect_run_setup():
 def display_run_setup_summary(
     setup,
 ):
-
     section(
         "Confirm Production Run"
     )
@@ -580,8 +592,13 @@ def display_run_setup_summary(
     )
 
     print(
-        f"Pack Weight: "
+        f"Pack Size: "
         f"{setup['pack_weight']}"
+    )
+
+    print(
+        f"Pack Weight KG: "
+        f"{setup['pack_weight_kg']:.3f}"
     )
 
     print(
@@ -610,17 +627,20 @@ def display_run_setup_summary(
     )
 
     print(
-        f"Previous Run Pallets Completed: "
+        f"Previous Run Completed: "
         f"{setup['previous_run_completed']}"
     )
+
+
+# ==========================================================
+# START PRODUCTION RUN
+# ==========================================================
 
 
 def start_production_run(
     carried_faults=None,
 ):
-
     while True:
-
         setup = (
             collect_run_setup()
         )
@@ -647,15 +667,12 @@ def start_production_run(
             "Please re-enter the details."
         )
 
-
     if carried_faults is None:
         carried_faults = []
-
 
     next_fault_id = 1
 
     if carried_faults:
-
         next_fault_id = (
             max(
                 fault[
@@ -666,7 +683,6 @@ def start_production_run(
             )
             + 1
         )
-
 
     run = {
         **setup,
@@ -691,7 +707,126 @@ def start_production_run(
 
         "events":
             [],
+
+        "database_run_id":
+            None,
     }
+
+    # ------------------------------------------------------
+    # SAVE START RUN TO SUPABASE
+    # ------------------------------------------------------
+
+    database_run = {
+        "production_line":
+            run[
+                "production_line"
+            ],
+
+        "line_technician":
+            run[
+                "line_technician"
+            ],
+
+        "shift":
+            run[
+                "shift"
+            ],
+
+        "customer":
+            run[
+                "customer"
+            ],
+
+        "product":
+            run[
+                "product"
+            ],
+
+        "pack_weight_kg":
+            run[
+                "pack_weight_kg"
+            ],
+
+        "packs_per_case":
+            run[
+                "packs_per_case"
+            ],
+
+        "pack_type":
+            run[
+                "pack_type"
+            ],
+
+        "target_speed_ppm":
+            run[
+                "target_speed_ppm"
+            ],
+
+        "cases_per_pallet":
+            run[
+                "cases_per_pallet"
+            ],
+
+        "starting_pallets_remaining":
+            run[
+                "pallets_remaining"
+            ],
+
+        "pallets_remaining":
+            run[
+                "pallets_remaining"
+            ],
+
+        "previous_run_completed":
+            run[
+                "previous_run_completed"
+            ],
+    }
+
+    try:
+        database_run_id = (
+            save_production_run(
+                database_run
+            )
+        )
+
+    except Exception as error:
+        print()
+        print(
+            "DATABASE ERROR"
+        )
+
+        print(
+            "Production Run was NOT "
+            "saved to Supabase."
+        )
+
+        print(
+            f"Error: {error}"
+        )
+
+        print()
+        print(
+            "The Production Run will "
+            "not start because persistence "
+            "is required for the pilot."
+        )
+
+        return None
+
+    run[
+        "database_run_id"
+    ] = database_run_id
+
+    print()
+    print(
+        "Production Run saved to Supabase."
+    )
+
+    print(
+        f"Database Run ID: "
+        f"{database_run_id}"
+    )
 
     return run
 
@@ -704,7 +839,6 @@ def start_production_run(
 def calculate_expected_output(
     run,
 ):
-
     expected_packs_per_hour = (
         run[
             "target_speed_ppm"
@@ -737,7 +871,6 @@ def calculate_hour_performance(
     run,
     hourly_update,
 ):
-
     (
         expected_packs,
         expected_cases,
@@ -746,9 +879,11 @@ def calculate_hour_performance(
         run
     )
 
-    actual_pallets = hourly_update[
-        "pallets_completed_this_hour"
-    ]
+    actual_pallets = (
+        hourly_update[
+            "pallets_completed_this_hour"
+        ]
+    )
 
     actual_cases = (
         actual_pallets
@@ -764,10 +899,21 @@ def calculate_hour_performance(
         ]
     )
 
+    production_variance_packs = (
+        actual_packs
+        - expected_packs
+    )
+
     lost_packs = max(
         0,
         expected_packs
         - actual_packs,
+    )
+
+    gained_packs = max(
+        0,
+        actual_packs
+        - expected_packs,
     )
 
     estimated_lost_minutes = (
@@ -796,8 +942,14 @@ def calculate_hour_performance(
         "actual_pallets":
             actual_pallets,
 
+        "production_variance_packs":
+            production_variance_packs,
+
         "lost_packs":
             lost_packs,
+
+        "gained_packs":
+            gained_packs,
 
         "estimated_lost_minutes":
             estimated_lost_minutes,
@@ -815,7 +967,6 @@ def create_fault(
     reason,
     retrospective=False,
 ):
-
     fault_id = run[
         "next_fault_id"
     ]
@@ -823,7 +974,6 @@ def create_fault(
     run[
         "next_fault_id"
     ] += 1
-
 
     fault = {
         "fault_id":
@@ -859,7 +1009,6 @@ def create_fault(
             retrospective,
     }
 
-
     run[
         "open_faults"
     ].append(
@@ -877,7 +1026,6 @@ def create_fault(
 def display_open_faults(
     run,
 ):
-
     section(
         "Open Faults"
     )
@@ -885,18 +1033,14 @@ def display_open_faults(
     if not run[
         "open_faults"
     ]:
-
         print(
             "No open faults."
         )
-
         return
-
 
     for fault in run[
         "open_faults"
     ]:
-
         print()
 
         print(
@@ -939,7 +1083,6 @@ def display_open_faults(
             ]
             is not None
         ):
-
             print(
                 f"Engineer: "
                 f"{fault['engineer']}"
@@ -947,7 +1090,7 @@ def display_open_faults(
 
 
 # ==========================================================
-# ENGINEERING WORKFLOW
+# ENGINEERING
 # ==========================================================
 
 
@@ -958,7 +1101,6 @@ def capture_engineering_update(
     finding_prompt,
     action_prompt,
 ):
-
     section(
         event_type
     )
@@ -972,28 +1114,23 @@ def capture_engineering_update(
         f"{fault['reason']}"
     )
 
-
     engineer = choose_option(
         "Select Engineer",
         engineers,
     )
 
-
     finding = get_engineering_text(
         finding_prompt
     )
-
 
     action = get_engineering_text(
         action_prompt
     )
 
-
     status = get_status(
         "Engineering Status "
         "(Resolved/Ongoing): "
     )
-
 
     fault[
         "engineer"
@@ -1003,30 +1140,33 @@ def capture_engineering_update(
         "engineering_status"
     ] = status.title()
 
-
     record_event(
         run,
         event_type,
         finding,
         engineer,
 
-        fault_id=fault[
-            "fault_id"
-        ],
+        fault_id=
+            fault[
+                "fault_id"
+            ],
 
-        machine=fault[
-            "machine"
-        ],
+        machine=
+            fault[
+                "machine"
+            ],
 
-        fault=fault[
-            "reason"
-        ],
+        fault=
+            fault[
+                "reason"
+            ],
 
-        action=action,
+        action=
+            action,
 
-        status=status.title(),
+        status=
+            status.title(),
     )
-
 
     print()
     print(
@@ -1062,21 +1202,13 @@ def engineering_initial_response(
     run,
     fault,
 ):
-
     return (
         capture_engineering_update(
-            run=run,
-
-            fault=fault,
-
-            event_type=
-                "Engineering Investigation",
-
-            finding_prompt=
-                "Initial Finding: ",
-
-            action_prompt=
-                "Action / Investigation: ",
+            run,
+            fault,
+            "Engineering Investigation",
+            "Initial Finding: ",
+            "Action / Investigation: ",
         )
     )
 
@@ -1085,22 +1217,14 @@ def engineering_follow_up(
     run,
     fault,
 ):
-
     return (
         capture_engineering_update(
-            run=run,
-
-            fault=fault,
-
-            event_type=
-                "Engineering Update",
-
-            finding_prompt=
-                "Why is the fault "
-                "still ongoing? ",
-
-            action_prompt=
-                "What is being done? ",
+            run,
+            fault,
+            "Engineering Update",
+            "Why is the fault "
+            "still ongoing? ",
+            "What is being done? ",
         )
     )
 
@@ -1114,16 +1238,13 @@ def ensure_engineer_called(
     run,
     fault,
 ):
-
     if (
         fault[
             "engineer_called"
         ]
         == "yes"
     ):
-
         return False
-
 
     print()
     print(
@@ -1132,22 +1253,18 @@ def ensure_engineer_called(
         "engineer called."
     )
 
-
     engineer_called = get_yes_no(
         "Has an Engineer now been "
         "called? "
         "(Yes/No): "
     )
 
-
     fault[
         "engineer_called"
     ] = engineer_called
 
-
     if engineer_called == "no":
         return False
-
 
     record_event(
         run,
@@ -1157,61 +1274,53 @@ def ensure_engineer_called(
             "line_technician"
         ],
 
-        fault_id=fault[
-            "fault_id"
-        ],
+        fault_id=
+            fault[
+                "fault_id"
+            ],
 
-        machine=fault[
-            "machine"
-        ],
+        machine=
+            fault[
+                "machine"
+            ],
 
-        fault=fault[
-            "reason"
-        ],
+        fault=
+            fault[
+                "reason"
+            ],
     )
-
 
     engineering_initial_response(
         run,
         fault,
     )
 
-
-    # Important:
-    # True means the initial response
-    # has already happened during this
-    # verification cycle.
     return True
 
 
 # ==========================================================
-# LIVE MACHINE DOWN EVENT
+# LIVE MACHINE DOWN
 # ==========================================================
 
 
 def report_machine_down(
     run,
 ):
-
     section(
         "MACHINE DOWN"
     )
-
 
     machine = get_required_text(
         "Machine / Area: "
     )
 
-
     reason = get_required_text(
         "Reason: "
     )
 
-
     technician = run[
         "line_technician"
     ]
-
 
     fault = create_fault(
         run,
@@ -1219,22 +1328,23 @@ def report_machine_down(
         reason,
     )
 
-
     record_event(
         run,
         "Machine Down",
         reason,
         technician,
 
-        fault_id=fault[
-            "fault_id"
-        ],
+        fault_id=
+            fault[
+                "fault_id"
+            ],
 
-        machine=machine,
+        machine=
+            machine,
 
-        status="Ongoing",
+        status=
+            "Ongoing",
     )
-
 
     print()
     print(
@@ -1242,44 +1352,40 @@ def report_machine_down(
         "opened."
     )
 
-
     engineer_called = get_yes_no(
         "Has an Engineer Been Called? "
         "(Yes/No): "
     )
 
-
     fault[
         "engineer_called"
     ] = engineer_called
 
-
     if engineer_called == "yes":
-
         record_event(
             run,
             "Engineering",
             "Engineer Called",
             technician,
 
-            fault_id=fault[
-                "fault_id"
-            ],
+            fault_id=
+                fault[
+                    "fault_id"
+                ],
 
-            machine=machine,
+            machine=
+                machine,
 
-            fault=reason,
+            fault=
+                reason,
         )
-
 
         engineering_initial_response(
             run,
             fault,
         )
 
-
     else:
-
         print()
         print(
             f"Fault #{fault['fault_id']} "
@@ -1289,14 +1395,13 @@ def report_machine_down(
 
 
 # ==========================================================
-# OPEN FAULT VERIFICATION
+# VERIFY OPEN FAULTS
 # ==========================================================
 
 
 def verify_open_faults(
     run,
 ):
-
     summary = {
         "verified_faults":
             0,
@@ -1308,30 +1413,22 @@ def verify_open_faults(
             0,
     }
 
-
     if not run[
         "open_faults"
     ]:
-
         return summary
-
 
     section(
         "Open Fault Verification"
     )
 
-
     resolved_faults = []
 
-
-    # Work on a copy so resolved
-    # faults can safely be removed later.
     for fault in list(
         run[
             "open_faults"
         ]
     ):
-
         print()
 
         print(
@@ -1353,17 +1450,14 @@ def verify_open_faults(
             f"{fault['engineering_status']}"
         )
 
-
         fault_status = get_status(
             "Line Technician Fault Status "
             "(Resolved/Ongoing): "
         )
 
-
         summary[
             "verified_faults"
         ] += 1
-
 
         record_event(
             run,
@@ -1375,37 +1469,28 @@ def verify_open_faults(
                 "line_technician"
             ],
 
-            fault_id=fault[
-                "fault_id"
-            ],
+            fault_id=
+                fault[
+                    "fault_id"
+                ],
 
-            machine=fault[
-                "machine"
-            ],
+            machine=
+                fault[
+                    "machine"
+                ],
 
             status=
                 fault_status.title(),
         )
 
-
-        # --------------------------------------------------
-        # RESOLVED BY LINE TECHNICIAN
-        # --------------------------------------------------
-
-        if (
-            fault_status
-            == "resolved"
-        ):
-
+        if fault_status == "resolved":
             fault[
                 "production_status"
             ] = "Resolved"
 
-
             summary[
                 "resolved_faults"
             ] += 1
-
 
             record_event(
                 run,
@@ -1415,26 +1500,28 @@ def verify_open_faults(
                     "line_technician"
                 ],
 
-                fault_id=fault[
-                    "fault_id"
-                ],
+                fault_id=
+                    fault[
+                        "fault_id"
+                    ],
 
-                machine=fault[
-                    "machine"
-                ],
+                machine=
+                    fault[
+                        "machine"
+                    ],
 
-                fault=fault[
-                    "reason"
-                ],
+                fault=
+                    fault[
+                        "reason"
+                    ],
 
-                status="Resolved",
+                status=
+                    "Resolved",
             )
-
 
             resolved_faults.append(
                 fault
             )
-
 
             print()
             print(
@@ -1443,23 +1530,15 @@ def verify_open_faults(
                 "Line Technician."
             )
 
-
             continue
-
-
-        # --------------------------------------------------
-        # STILL ONGOING
-        # --------------------------------------------------
 
         fault[
             "production_status"
         ] = "Ongoing"
 
-
         summary[
             "ongoing_faults"
         ] += 1
-
 
         record_event(
             run,
@@ -1469,28 +1548,30 @@ def verify_open_faults(
                 "line_technician"
             ],
 
-            fault_id=fault[
-                "fault_id"
-            ],
+            fault_id=
+                fault[
+                    "fault_id"
+                ],
 
-            machine=fault[
-                "machine"
-            ],
+            machine=
+                fault[
+                    "machine"
+                ],
 
-            fault=fault[
-                "reason"
-            ],
+            fault=
+                fault[
+                    "reason"
+                ],
 
-            status="Ongoing",
+            status=
+                "Ongoing",
         )
-
 
         print()
         print(
             f"Fault #{fault['fault_id']} "
             "is still ongoing."
         )
-
 
         newly_called = (
             ensure_engineer_called(
@@ -1499,40 +1580,26 @@ def verify_open_faults(
             )
         )
 
-
-        # The initial response has just
-        # happened, so don't immediately
-        # ask for a second response.
         if newly_called:
             continue
 
-
-        # Engineer was already involved.
-        # An ongoing production fault now
-        # requires another engineer update.
         if (
             fault[
                 "engineer_called"
             ]
             == "yes"
         ):
-
             engineering_follow_up(
                 run,
                 fault,
             )
 
-
-    # Remove resolved faults only once
-    # verification is complete.
     for fault in resolved_faults:
-
         run[
             "open_faults"
         ].remove(
             fault
         )
-
 
     return summary
 
@@ -1545,19 +1612,13 @@ def verify_open_faults(
 def capture_retrospective_downtime(
     run,
 ):
-
     unreported_downtime = get_yes_no(
         "Any other unreported "
         "unplanned downtime this hour? "
         "(Yes/No): "
     )
 
-
-    if (
-        unreported_downtime
-        == "no"
-    ):
-
+    if unreported_downtime == "no":
         return {
             "reported":
                 False,
@@ -1572,16 +1633,13 @@ def capture_retrospective_downtime(
                 None,
         }
 
-
     machine = get_required_text(
         "Machine / Area: "
     )
 
-
     reason = get_required_text(
         "Unplanned Downtime Reason: "
     )
-
 
     fault = create_fault(
         run,
@@ -1589,7 +1647,6 @@ def capture_retrospective_downtime(
         reason,
         retrospective=True,
     )
-
 
     record_event(
         run,
@@ -1599,15 +1656,17 @@ def capture_retrospective_downtime(
             "line_technician"
         ],
 
-        fault_id=fault[
-            "fault_id"
-        ],
+        fault_id=
+            fault[
+                "fault_id"
+            ],
 
-        machine=machine,
+        machine=
+            machine,
 
-        status="Retrospective",
+        status=
+            "Retrospective",
     )
-
 
     already_resolved = get_yes_no(
         "Is this retrospective fault "
@@ -1615,16 +1674,10 @@ def capture_retrospective_downtime(
         "(Yes/No): "
     )
 
-
-    if (
-        already_resolved
-        == "yes"
-    ):
-
+    if already_resolved == "yes":
         fault[
             "production_status"
         ] = "Resolved"
-
 
         record_event(
             run,
@@ -1635,24 +1688,26 @@ def capture_retrospective_downtime(
                 "line_technician"
             ],
 
-            fault_id=fault[
-                "fault_id"
-            ],
+            fault_id=
+                fault[
+                    "fault_id"
+                ],
 
-            machine=machine,
+            machine=
+                machine,
 
-            fault=reason,
+            fault=
+                reason,
 
-            status="Resolved",
+            status=
+                "Resolved",
         )
-
 
         run[
             "open_faults"
         ].remove(
             fault
         )
-
 
     return {
         "reported":
@@ -1679,18 +1734,15 @@ def capture_retrospective_downtime(
 def collect_hourly_update(
     run,
 ):
-
     section(
         "Hourly Production Update"
     )
-
 
     oee = get_float(
         "OEE (%): ",
         minimum=0,
         maximum=100,
     )
-
 
     pallets_completed_this_hour = (
         get_int(
@@ -1700,14 +1752,12 @@ def collect_hourly_update(
         )
     )
 
-
     planned_downtime = (
         choose_option(
             "Planned Downtime",
             planned_downtime_types,
         )
     )
-
 
     fault_summary = {
         "verified_faults":
@@ -1720,27 +1770,20 @@ def collect_hourly_update(
             0,
     }
 
-
     if run[
         "open_faults"
     ]:
-
         fault_summary = (
             verify_open_faults(
                 run
             )
         )
 
-
-    # Always check whether something
-    # else happened, even if known
-    # faults already existed.
     retrospective_downtime = (
         capture_retrospective_downtime(
             run
         )
     )
-
 
     return {
         "oee":
@@ -1788,20 +1831,17 @@ def check_unexplained_production_loss(
     hourly_update,
     performance,
 ):
+    lost_minutes = (
+        performance[
+            "estimated_lost_minutes"
+        ]
+    )
 
-    lost_minutes = performance[
-        "estimated_lost_minutes"
-    ]
-
-
-    # Ignore normal small variation.
     if (
         lost_minutes
         < UNEXPLAINED_LOSS_MINUTES_THRESHOLD
     ):
-
         return
-
 
     planned_downtime_recorded = (
         hourly_update[
@@ -1810,7 +1850,6 @@ def check_unexplained_production_loss(
         != "None"
     )
 
-
     known_fault_recorded = (
         hourly_update[
             "verified_faults"
@@ -1818,15 +1857,17 @@ def check_unexplained_production_loss(
         > 0
     )
 
-
     retrospective_recorded = (
-        hourly_update[
-            "retrospective_downtime"
-        ][
-            "reported"
-        ]
+        hourly_update
+        .get(
+            "retrospective_downtime",
+            {},
+        )
+        .get(
+            "reported",
+            False,
+        )
     )
-
 
     loss_has_explanation = (
         planned_downtime_recorded
@@ -1834,10 +1875,8 @@ def check_unexplained_production_loss(
         or retrospective_recorded
     )
 
-
     if loss_has_explanation:
         return
-
 
     print()
     print(
@@ -1852,54 +1891,38 @@ def check_unexplained_production_loss(
         "==================================="
     )
 
-
     print(
         f"OEE: "
         f"{hourly_update['oee']}%"
     )
-
 
     print(
         f"Expected Pallets: "
         f"{performance['expected_pallets']:.2f}"
     )
 
-
     print(
         f"Actual Pallets: "
         f"{performance['actual_pallets']}"
     )
-
 
     print(
         f"Estimated Lost Production Time: "
         f"{lost_minutes:.1f} minutes"
     )
 
-
-    print()
-    print(
-        "No planned downtime, known fault "
-        "or retrospective downtime explains "
-        "this production loss."
-    )
-
-
     reason = get_required_text(
         "Reason for production loss "
         "(or enter Unknown): "
     )
 
-
     hourly_update[
         "unexplained_loss"
     ] = True
 
-
     hourly_update[
         "unexplained_loss_reason"
     ] = reason
-
 
     record_event(
         run,
@@ -1909,32 +1932,36 @@ def check_unexplained_production_loss(
             "line_technician"
         ],
 
-        oee=hourly_update[
-            "oee"
-        ],
-
-        expected_pallets=round(
-            performance[
-                "expected_pallets"
+        oee=
+            hourly_update[
+                "oee"
             ],
-            2,
-        ),
+
+        expected_pallets=
+            round(
+                performance[
+                    "expected_pallets"
+                ],
+                2,
+            ),
 
         actual_pallets=
             performance[
                 "actual_pallets"
             ],
 
-        lost_packs=round(
-            performance[
-                "lost_packs"
-            ]
-        ),
+        lost_packs=
+            round(
+                performance[
+                    "lost_packs"
+                ]
+            ),
 
-        estimated_lost_minutes=round(
-            lost_minutes,
-            1,
-        ),
+        estimated_lost_minutes=
+            round(
+                lost_minutes,
+                1,
+            ),
 
         status=
             "Needs Investigation",
@@ -1950,11 +1977,11 @@ def update_run_progress(
     run,
     hourly_update,
 ):
-
-    pallets_completed = hourly_update[
-        "pallets_completed_this_hour"
-    ]
-
+    pallets_completed = (
+        hourly_update[
+            "pallets_completed_this_hour"
+        ]
+    )
 
     if (
         run[
@@ -1962,13 +1989,11 @@ def update_run_progress(
         ]
         <= 0
     ):
-
         run[
             "potential_overrun_pallets"
         ] += pallets_completed
 
         return
-
 
     planned_pallets = min(
         pallets_completed,
@@ -1977,22 +2002,18 @@ def update_run_progress(
         ],
     )
 
-
     potential_overrun = (
         pallets_completed
         - planned_pallets
     )
 
-
     run[
         "total_pallets_completed"
     ] += planned_pallets
 
-
     run[
         "pallets_remaining"
     ] -= planned_pallets
-
 
     run[
         "potential_overrun_pallets"
@@ -2009,11 +2030,14 @@ def display_hourly_report(
     hourly_update,
     performance,
 ):
-
     section(
         "TonnageFlow Pulse"
     )
 
+    print(
+        f"Database Run ID: "
+        f"{run['database_run_id']}"
+    )
 
     print(
         f"Production Line: "
@@ -2028,6 +2052,11 @@ def display_hourly_report(
     print(
         f"Product: "
         f"{run['product']}"
+    )
+
+    print(
+        f"Pack Size: "
+        f"{run['pack_weight']}"
     )
 
     print(
@@ -2062,12 +2091,10 @@ def display_hourly_report(
         f"{run['potential_overrun_pallets']}"
     )
 
-
     print()
     print(
         "--- Expected vs Actual ---"
     )
-
 
     print(
         f"Expected Packs This Hour: "
@@ -2090,8 +2117,18 @@ def display_hourly_report(
     )
 
     print(
+        f"Production Variance Packs: "
+        f"{performance['production_variance_packs']:.0f}"
+    )
+
+    print(
         f"Estimated Lost Packs: "
         f"{performance['lost_packs']:.0f}"
+    )
+
+    print(
+        f"Above Target Packs: "
+        f"{performance['gained_packs']:.0f}"
     )
 
     print(
@@ -2099,7 +2136,6 @@ def display_hourly_report(
         f"{performance['estimated_lost_minutes']:.1f} "
         f"minutes"
     )
-
 
     print()
 
@@ -2128,11 +2164,9 @@ def display_hourly_report(
         f"{len(run['open_faults'])}"
     )
 
-
     if hourly_update[
         "unexplained_loss"
     ]:
-
         print()
         print(
             "WARNING: Unexplained "
@@ -2153,24 +2187,19 @@ def display_hourly_report(
 def confirm_run_close(
     run,
 ):
-
     if not run[
         "open_faults"
     ]:
-
         return True
-
 
     print()
     print(
         "WARNING: Open faults remain."
     )
 
-
     display_open_faults(
         run
     )
-
 
     close_anyway = get_yes_no(
         "Close Production Run with "
@@ -2178,19 +2207,13 @@ def confirm_run_close(
         "(Yes/No): "
     )
 
-
-    if (
-        close_anyway
-        == "no"
-    ):
-
+    if close_anyway == "no":
         print()
         print(
             "Production Run remains active."
         )
 
         return False
-
 
     record_event(
         run,
@@ -2200,43 +2223,15 @@ def confirm_run_close(
             "line_technician"
         ],
 
-        open_fault_count=len(
-            run[
-                "open_faults"
-            ]
-        ),
+        open_fault_count=
+            len(
+                run[
+                    "open_faults"
+                ]
+            ),
     )
 
-
     return True
-
-
-# ==========================================================
-# CARRY OPEN FAULTS FORWARD
-# ==========================================================
-
-
-def copy_faults_for_next_run(
-    run,
-):
-
-    carried_faults = []
-
-
-    for fault in run[
-        "open_faults"
-    ]:
-
-        copied_fault = (
-            fault.copy()
-        )
-
-        carried_faults.append(
-            copied_fault
-        )
-
-
-    return carried_faults
 
 
 # ==========================================================
@@ -2247,34 +2242,37 @@ def copy_faults_for_next_run(
 def handle_run_completion(
     run,
 ):
-
     section(
         "Production Run Completion"
     )
 
-
     changeover_type = (
         choose_option(
             "Select Changeover Type",
-            [
-                "Product Changeover",
-                "Customer Changeover",
-            ],
+            changeover_types,
         )
     )
 
+    run[
+        "changeover_type"
+    ] = changeover_type
+
+    # ------------------------------------------------------
+    # PRODUCT CHANGEOVER
+    # Product changes.
+    # System may need emptying.
+    # Potential overrun is confirmed.
+    # ------------------------------------------------------
 
     if (
         changeover_type
         == "Product Changeover"
     ):
-
         run[
             "confirmed_overrun_pallets"
         ] = run[
             "potential_overrun_pallets"
         ]
-
 
         record_event(
             run,
@@ -2283,12 +2281,22 @@ def handle_run_completion(
             run[
                 "line_technician"
             ],
-        )
 
+            status=
+                "Complete",
+        )
 
         print()
         print(
             "Product Changeover"
+        )
+
+        print(
+            "Product is changing."
+        )
+
+        print(
+            "Process emptying may be required."
         )
 
         print(
@@ -2299,11 +2307,70 @@ def handle_run_completion(
 
         return
 
+    # ------------------------------------------------------
+    # SIZE CHANGEOVER
+    # Same product may continue.
+    # Pack size changes.
+    # Example 500g -> 1kg.
+    # Product overrun is NOT automatically confirmed.
+    # ------------------------------------------------------
+
+    if (
+        changeover_type
+        == "Size Changeover"
+    ):
+        run[
+            "confirmed_overrun_pallets"
+        ] = 0
+
+        record_event(
+            run,
+            "Changeover",
+            "Size Changeover",
+            run[
+                "line_technician"
+            ],
+
+            previous_pack_size=
+                run[
+                    "pack_weight"
+                ],
+
+            status=
+                "Complete",
+        )
+
+        print()
+        print(
+            "Size Changeover"
+        )
+
+        print(
+            f"Current Size: "
+            f"{run['pack_weight']}"
+        )
+
+        print(
+            "The next Production Run "
+            "must select a valid size "
+            "for the selected line."
+        )
+
+        print(
+            "No product overrun "
+            "automatically confirmed."
+        )
+
+        return
+
+    # ------------------------------------------------------
+    # CUSTOMER CHANGEOVER
+    # Same product and size should normally continue.
+    # ------------------------------------------------------
 
     run[
         "confirmed_overrun_pallets"
     ] = 0
-
 
     record_event(
         run,
@@ -2312,8 +2379,20 @@ def handle_run_completion(
         run[
             "line_technician"
         ],
-    )
 
+        product=
+            run[
+                "product"
+            ],
+
+        pack_size=
+            run[
+                "pack_weight"
+            ],
+
+        status=
+            "Complete",
+    )
 
     print()
     print(
@@ -2321,12 +2400,30 @@ def handle_run_completion(
     )
 
     print(
-        "Same product continues."
+        "Same product and pack size "
+        "can continue."
     )
 
     print(
         "No product overrun confirmed."
     )
+
+
+# ==========================================================
+# CARRY OPEN FAULTS FORWARD
+# ==========================================================
+
+
+def copy_faults_for_next_run(
+    run,
+):
+    return [
+        fault.copy()
+        for fault
+        in run[
+            "open_faults"
+        ]
+    ]
 
 
 # ==========================================================
@@ -2376,17 +2473,21 @@ event_field_labels = {
 
     "estimated_lost_minutes":
         "Estimated Lost Minutes",
+
+    "previous_pack_size":
+        "Previous Pack Size",
+
+    "pack_size":
+        "Pack Size",
 }
 
 
 def display_run_events(
     run,
 ):
-
     section(
         "Production Run Events"
     )
-
 
     core_fields = {
         "event_type",
@@ -2394,11 +2495,9 @@ def display_run_events(
         "reported_by",
     }
 
-
     for event in run[
         "events"
     ]:
-
         print()
 
         print(
@@ -2408,16 +2507,12 @@ def display_run_events(
             f"{event['reported_by']}"
         )
 
-
         for (
             key,
             value,
         ) in event.items():
-
-
             if key in core_fields:
                 continue
-
 
             label = (
                 event_field_labels.get(
@@ -2431,14 +2526,11 @@ def display_run_events(
                 )
             )
 
-
             if key == "fault_id":
                 value = f"#{value}"
 
-
             if key == "oee":
                 value = f"{value}%"
-
 
             print(
                 f"{label}: {value}"
@@ -2453,7 +2545,6 @@ def display_run_events(
 def display_production_model(
     run,
 ):
-
     (
         expected_packs,
         expected_cases,
@@ -2462,11 +2553,24 @@ def display_production_model(
         run
     )
 
-
     section(
         "Production Model"
     )
 
+    print(
+        f"Database Run ID: "
+        f"{run['database_run_id']}"
+    )
+
+    print(
+        f"Production Line: "
+        f"{run['production_line']}"
+    )
+
+    print(
+        f"Pack Size: "
+        f"{run['pack_weight']}"
+    )
 
     print(
         f"Previous Run Completed: "
@@ -2474,24 +2578,20 @@ def display_production_model(
         f"Pallets"
     )
 
-
     print(
         f"Expected Packs per Hour: "
         f"{expected_packs:.0f}"
     )
-
 
     print(
         f"Expected Cases per Hour: "
         f"{expected_cases:.0f}"
     )
 
-
     print(
         f"Expected Pallets per Hour: "
         f"{expected_pallets:.2f}"
     )
-
 
     print(
         f"Starting Pallets Remaining: "
@@ -2505,21 +2605,13 @@ def display_production_model(
 
 
 def run_session():
-
     welcome()
-
 
     tracking_finished = False
 
-
-    # Open faults can survive a
-    # Production Run change.
     carried_faults = []
 
-
     while not tracking_finished:
-
-
         production_run = (
             start_production_run(
                 carried_faults=
@@ -2527,9 +2619,17 @@ def run_session():
             )
         )
 
+        # Database persistence is required.
+        # If start failed, retry setup.
+        if production_run is None:
+            print()
+            print(
+                "Please correct the database "
+                "or run setup issue and try again."
+            )
+            continue
 
         carried_faults = []
-
 
         record_event(
             production_run,
@@ -2539,17 +2639,20 @@ def run_session():
                 "line_technician"
             ],
 
+            database_run_id=
+                production_run[
+                    "database_run_id"
+                ],
+
             previous_run_completed=
                 production_run[
                     "previous_run_completed"
                 ],
         )
 
-
         if production_run[
             "open_faults"
         ]:
-
             record_event(
                 production_run,
                 "Production Run",
@@ -2559,23 +2662,21 @@ def run_session():
                     "line_technician"
                 ],
 
-                open_fault_count=len(
-                    production_run[
-                        "open_faults"
-                    ]
-                ),
+                open_fault_count=
+                    len(
+                        production_run[
+                            "open_faults"
+                        ]
+                    ),
             )
-
 
         display_production_model(
             production_run
         )
 
-
         if production_run[
             "open_faults"
         ]:
-
             print()
             print(
                 "Outstanding faults have "
@@ -2587,65 +2688,44 @@ def run_session():
                 production_run
             )
 
-
         run_finished = False
 
-
-        # ==================================================
-        # PRODUCTION RUN ACTIVITY LOOP
-        # ==================================================
-
-
         while not run_finished:
-
-
             activity = (
                 get_run_activity()
             )
 
-
-            # ----------------------------------------------
+            # ------------------------------------------------
             # MACHINE DOWN
-            # ----------------------------------------------
+            # ------------------------------------------------
 
-            if (
-                activity
-                == "machine_down"
-            ):
-
+            if activity == "machine_down":
                 report_machine_down(
                     production_run
                 )
 
                 continue
 
-
-            # ----------------------------------------------
+            # ------------------------------------------------
             # SHOW OPEN FAULTS
-            # ----------------------------------------------
+            # ------------------------------------------------
 
-            if (
-                activity
-                == "show_faults"
-            ):
-
+            if activity == "show_faults":
                 display_open_faults(
                     production_run
                 )
 
                 continue
 
-
-            # ----------------------------------------------
+            # ------------------------------------------------
             # HOURLY UPDATE
-            # ----------------------------------------------
+            # ------------------------------------------------
 
             hourly_update = (
                 collect_hourly_update(
                     production_run
                 )
             )
-
 
             record_event(
                 production_run,
@@ -2655,9 +2735,10 @@ def run_session():
                     "line_technician"
                 ],
 
-                oee=hourly_update[
-                    "oee"
-                ],
+                oee=
+                    hourly_update[
+                        "oee"
+                    ],
 
                 pallets_completed=
                     hourly_update[
@@ -2665,14 +2746,12 @@ def run_session():
                     ],
             )
 
-
             if (
                 hourly_update[
                     "planned_downtime"
                 ]
                 != "None"
             ):
-
                 record_event(
                     production_run,
                     "Planned Downtime",
@@ -2684,7 +2763,6 @@ def run_session():
                     ],
                 )
 
-
             hour_performance = (
                 calculate_hour_performance(
                     production_run,
@@ -2692,22 +2770,16 @@ def run_session():
                 )
             )
 
-
-            # SNAG 011 FIX:
-            # Do not silently accept
-            # significant unexplained loss.
             check_unexplained_production_loss(
                 production_run,
                 hourly_update,
                 hour_performance,
             )
 
-
             update_run_progress(
                 production_run,
                 hourly_update,
             )
-
 
             display_hourly_report(
                 production_run,
@@ -2715,18 +2787,12 @@ def run_session():
                 hour_performance,
             )
 
-
-            # ----------------------------------------------
-            # RUN STILL ACTIVE
-            # ----------------------------------------------
-
             if (
                 production_run[
                     "pallets_remaining"
                 ]
                 > 0
             ):
-
                 print()
                 print(
                     "Production run continues."
@@ -2734,22 +2800,15 @@ def run_session():
 
                 continue
 
-
-            # ----------------------------------------------
-            # PLANNED QUANTITY COMPLETE
-            # ----------------------------------------------
-
             print()
             print(
                 "Planned quantity complete."
             )
 
-
             print(
                 f"Potential Overrun Pallets: "
                 f"{production_run['potential_overrun_pallets']}"
             )
-
 
             run_confirmation = (
                 get_yes_no(
@@ -2759,12 +2818,7 @@ def run_session():
                 )
             )
 
-
-            if (
-                run_confirmation
-                == "no"
-            ):
-
+            if run_confirmation == "no":
                 print()
                 print(
                     "Production Run "
@@ -2779,17 +2833,14 @@ def run_session():
 
                 continue
 
-
             can_close = (
                 confirm_run_close(
                     production_run
                 )
             )
 
-
             if not can_close:
                 continue
-
 
             record_event(
                 production_run,
@@ -2800,74 +2851,66 @@ def run_session():
                 ],
             )
 
-
             run_finished = True
 
-
-        # ==================================================
-        # RUN COMPLETE
-        # ==================================================
-
+        # --------------------------------------------------
+        # CHANGEOVER TYPE
+        # --------------------------------------------------
 
         handle_run_completion(
             production_run
         )
 
-
         section(
             "Production Run Closed"
         )
 
+        print(
+            f"Database Run ID: "
+            f"{production_run['database_run_id']}"
+        )
 
         print(
             f"Planned Pallets Completed: "
             f"{production_run['total_pallets_completed']}"
         )
 
-
         print(
             f"Potential Overrun Pallets: "
             f"{production_run['potential_overrun_pallets']}"
         )
-
 
         print(
             f"Confirmed Overrun Pallets: "
             f"{production_run['confirmed_overrun_pallets']}"
         )
 
+        print(
+            f"Changeover Type: "
+            f"{production_run['changeover_type']}"
+        )
 
         print(
             f"Open Faults at Run Close: "
             f"{len(production_run['open_faults'])}"
         )
 
-
         display_run_events(
             production_run
         )
 
-
-        # Any unresolved fault is retained
-        # if the next Production Run starts.
         carried_faults = (
             copy_faults_for_next_run(
                 production_run
             )
         )
 
-
         next_run = get_yes_no(
             "Start another Production Run? "
             "(Yes/No): "
         )
 
-
-        if (
-            next_run
-            == "yes"
-        ):
-
+        if next_run == "yes":
             print()
             print(
                 "Preparing next "
@@ -2876,9 +2919,7 @@ def run_session():
 
             continue
 
-
         tracking_finished = True
-
 
     print()
     print(
@@ -2893,5 +2934,4 @@ def run_session():
 
 
 if __name__ == "__main__":
-
     run_session()
