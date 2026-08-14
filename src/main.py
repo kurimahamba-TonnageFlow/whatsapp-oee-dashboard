@@ -5,7 +5,10 @@
 
 from datetime import datetime
 
-from database import save_production_run
+from database import (
+    save_production_run,
+    save_hourly_update,
+)
 
 
 # ==========================================================
@@ -2781,11 +2784,122 @@ def run_session():
                 hourly_update,
             )
 
+            database_hourly_update = {
+                "production_run_id":
+                    production_run[
+                        "database_run_id"
+                    ],
+
+                "oee":
+                    hourly_update[
+                        "oee"
+                    ],
+
+                "pallets_completed":
+                    hourly_update[
+                        "pallets_completed_this_hour"
+                    ],
+
+                "planned_downtime":
+                    hourly_update[
+                        "planned_downtime"
+                    ],
+
+                "expected_packs":
+                    hour_performance[
+                        "expected_packs"
+                    ],
+
+                "actual_packs":
+                    hour_performance[
+                        "actual_packs"
+                    ],
+
+                "expected_pallets":
+                    hour_performance[
+                        "expected_pallets"
+                    ],
+
+                "actual_pallets":
+                    hour_performance[
+                        "actual_pallets"
+                    ],
+
+                "production_variance_packs":
+                    hour_performance[
+                        "production_variance_packs"
+                    ],
+
+                "estimated_lost_packs":
+                    hour_performance[
+                        "lost_packs"
+                    ],
+
+                "estimated_lost_minutes":
+                    hour_performance[
+                        "estimated_lost_minutes"
+                    ],
+
+                "unexplained_loss":
+                    hourly_update[
+                        "unexplained_loss"
+                    ],
+
+                "unexplained_loss_reason":
+                    hourly_update[
+                        "unexplained_loss_reason"
+                    ],
+
+                "pallets_remaining":
+                    production_run[
+                        "pallets_remaining"
+                    ],
+            }
+
+            try:
+                hourly_update_id = (
+                    save_hourly_update(
+                        database_hourly_update
+                    )
+                )
+
+                hourly_update[
+                    "database_hourly_update_id"
+                ] = hourly_update_id
+
+                print()
+                print(
+                    "Hourly Update saved "
+                    "to Supabase."
+                )
+
+                print(
+                    f"Hourly Update ID: "
+                    f"{hourly_update_id}"
+                )
+
+            except Exception as error:
+                print()
+                print(
+                    "DATABASE ERROR"
+                )
+
+                print(
+                    "Hourly Update was NOT "
+                    "saved to Supabase."
+                )
+
+                print(
+                    f"Error: {error}"
+                )
+
             display_hourly_report(
                 production_run,
                 hourly_update,
                 hour_performance,
             )
+
+
 
             if (
                 production_run[
