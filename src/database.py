@@ -153,3 +153,45 @@ def save_hourly_update(update):
         )
 
     return saved_update[0]
+
+def save_downtime_event(event):
+    query = """
+        INSERT INTO public.downtime_events (
+            production_run_id,
+            fault_id,
+            machine,
+            reason,
+            reported_by,
+            engineer_called,
+            production_status,
+            engineering_status,
+            engineer,
+            retrospective,
+            opened_at,
+            resolved_at
+        )
+        VALUES (
+            %(production_run_id)s,
+            %(fault_id)s,
+            %(machine)s,
+            %(reason)s,
+            %(reported_by)s,
+            %(engineer_called)s,
+            %(production_status)s,
+            %(engineering_status)s,
+            %(engineer)s,
+            %(retrospective)s,
+            %(opened_at)s,
+            %(resolved_at)s
+        )
+        RETURNING id;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, event)
+            downtime_event_id = cursor.fetchone()[0]
+
+        connection.commit()
+
+    return downtime_event_id
