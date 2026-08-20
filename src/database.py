@@ -1,6 +1,7 @@
 import os
 
 import psycopg
+from psycopg.rows import dict_row
 from dotenv import load_dotenv
 
 
@@ -195,3 +196,164 @@ def save_downtime_event(event):
         connection.commit()
 
     return downtime_event_id
+
+def save_engineering_update(update):
+    query = """
+        INSERT INTO public.engineering_updates (
+            downtime_event_id,
+            production_run_id,
+            fault_id,
+            engineer,
+            update_type,
+            finding,
+            action,
+            engineering_status
+        )
+        VALUES (
+            %(downtime_event_id)s,
+            %(production_run_id)s,
+            %(fault_id)s,
+            %(engineer)s,
+            %(update_type)s,
+            %(finding)s,
+            %(action)s,
+            %(engineering_status)s
+        )
+        RETURNING id;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                query,
+                update,
+            )
+
+            saved_update = cursor.fetchone()
+
+        connection.commit()
+
+    if saved_update is None:
+        raise RuntimeError(
+            "Engineering Update was inserted "
+            "but no database ID was returned."
+        )
+
+    return saved_update[0]
+
+
+def get_open_faults(production_run_id):
+    query = """
+        SELECT *
+        FROM public.downtime_events
+        WHERE production_run_id = %s
+        AND production_status = 'Ongoing'
+        AND resolved_at IS NULL;
+    """
+
+    with get_database_connection() as connection:
+       with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                query,
+                (production_run_id,),
+            )
+
+            open_faults = cursor.fetchall()
+
+    return open_faults
+
+def get_active_production_run(production_line):
+    query = """
+        SELECT
+            id,
+            production_line,
+            line_technician,
+            shift,
+            customer,
+            product,
+            pack_weight_kg,
+            packs_per_case,
+            pack_type,
+            target_speed_ppm,
+            cases_per_pallet,
+            starting_pallets_remaining,
+            pallets_remaining,
+            previous_run_completed,
+            total_pallets_completed,
+            status,
+            started_at
+        FROM public.production_runs
+        WHERE production_line = %s
+          AND status = 'Active'
+        ORDER BY started_at DESC
+        LIMIT 1;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                query,
+                (production_line,),
+            )
+
+            active_run = cursor.fetchone()
+
+    return active_run
+
+def update_downtime_event_state(
+    downtime_event_id,
+    engineer_called,
+    production_status,
+    engineering_status,
+    engineer,
+    resolved_at=None,
+):
+    query = """
+        UPDATE public.downtime_events
+        SET
+            engineer_called = %(engineer_called)s,
+            production_status = %(production_status)s,
+            engineering_status = %(engineering_status)s,
+            engineer = %(engineer)s,
+            resolved_at = %(resolved_at)s
+        WHERE id = %(downtime_event_id)s
+        RETURNING id;
+    """
+
+    update = {
+        "downtime_event_id":
+            downtime_event_id,
+
+        "engineer_called":
+            engineer_called,
+
+        "production_status":
+            production_status,
+
+        "engineering_status":
+            engineering_status,
+
+        "engineer":
+            engineer,
+
+        "resolved_at":
+            resolved_at,
+    }
+
+    with get_database_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                query,
+                update,
+            )
+
+            updated_event = cursor.fetchone()
+
+        connection.commit()
+
+    if updated_event is None:
+        raise RuntimeError(
+            "Downtime Event was not updated."
+        )
+
+    return updated_event[0]

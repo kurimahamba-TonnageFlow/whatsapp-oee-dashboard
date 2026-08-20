@@ -5,10 +5,27 @@
 
 from datetime import datetime
 
-from database import (
-    save_production_run,
-    save_hourly_update,
-)
+try:
+    from .database import (
+        save_production_run,
+        save_hourly_update,
+        save_downtime_event,
+        save_engineering_update,
+        get_open_faults,
+        get_active_production_run,
+    )
+except ImportError:
+    from database import (
+        save_production_run,
+        save_hourly_update,
+        save_downtime_event,
+        save_engineering_update,
+        get_open_faults,
+        get_active_production_run,
+    )
+
+
+
 
 
 # ==========================================================
@@ -50,6 +67,7 @@ engineers = [
     "Steve",
     "Dan",
     "Kuri",
+    "Alfie"
 ]
 
 
@@ -639,6 +657,87 @@ def display_run_setup_summary(
 # START PRODUCTION RUN
 # ==========================================================
 
+def build_fault_from_database(database_fault):
+    opened_at = database_fault["opened_at"]
+
+    if opened_at is not None:
+        opened_at = opened_at.isoformat()
+
+    return {
+        "fault_id":
+            database_fault["fault_id"],
+
+        "machine":
+            database_fault["machine"],
+
+        "reason":
+            database_fault["reason"],
+
+        "reported_by":
+            database_fault["reported_by"],
+
+        "reported_at":
+            opened_at,
+
+        "engineer_called":
+            (
+                "yes"
+                if database_fault["engineer_called"]
+                else "no"
+            ),
+
+        "production_status":
+            database_fault["production_status"],
+
+        "engineering_status":
+            database_fault["engineering_status"],
+
+        "engineer":
+            database_fault["engineer"],
+
+        "retrospective":
+            database_fault["retrospective"],
+
+        "database_downtime_event_id":
+            database_fault["id"],
+    }
+
+
+def recover_production_run(production_line):
+    database_run = get_active_production_run(
+        production_line
+    )
+
+    if database_run is None:
+        return None
+
+    database_faults = get_open_faults(
+        database_run["id"]
+    )
+
+    open_faults = [
+        build_fault_from_database(fault)
+        for fault in database_faults
+    ]
+
+    run = dict(database_run)
+
+    run["database_run_id"] = database_run["id"]
+    run["open_faults"] = open_faults
+
+    if open_faults:
+        run["next_fault_id"] = (
+            max(
+                fault["fault_id"]
+                for fault in open_faults
+            )
+            + 1
+        )
+    else:
+        run["next_fault_id"] = 1
+
+    return run
+
 
 def start_production_run(
     carried_faults=None,
@@ -1171,6 +1270,91 @@ def capture_engineering_update(
             status.title(),
     )
 
+    # ------------------------------------------------------
+    # DETERMINE DATABASE UPDATE TYPE
+    # ------------------------------------------------------
+
+    if status == "resolved":
+        update_type = "Resolution"
+
+    elif (
+        event_type
+        == "Engineering Investigation"
+    ):
+        update_type = "Investigation"
+
+    else:
+        update_type = "Follow Up"
+
+    # ------------------------------------------------------
+    # SAVE ENGINEERING UPDATE TO SUPABASE
+    # ------------------------------------------------------
+
+    database_engineering_update = {
+        "downtime_event_id":
+            fault[
+                "database_downtime_event_id"
+            ],
+
+        "production_run_id":
+            run[
+                "database_run_id"
+            ],
+
+        "fault_id":
+            fault[
+                "fault_id"
+            ],
+
+        "engineer":
+            engineer,
+
+        "update_type":
+            update_type,
+
+        "finding":
+            finding,
+
+        "action":
+            action,
+
+        "engineering_status":
+            status.title(),
+    }
+
+    try:
+        engineering_update_id = (
+            save_engineering_update(
+                database_engineering_update
+            )
+        )
+
+        print()
+        print(
+            "Engineering Update saved "
+            "to Supabase."
+        )
+
+        print(
+            f"Engineering Update ID: "
+            f"{engineering_update_id}"
+        )
+
+    except Exception as error:
+        print()
+        print(
+            "DATABASE ERROR"
+        )
+
+        print(
+            "Engineering Update was NOT "
+            "saved to Supabase."
+        )
+
+        print(
+            f"Error: {error}"
+        )
+
     print()
     print(
         "Engineering update recorded."
@@ -1305,7 +1489,6 @@ def ensure_engineer_called(
 # LIVE MACHINE DOWN
 # ==========================================================
 
-
 def report_machine_down(
     run,
 ):
@@ -1363,6 +1546,116 @@ def report_machine_down(
     fault[
         "engineer_called"
     ] = engineer_called
+
+    # ------------------------------------------------------
+    # SAVE DOWNTIME EVENT TO SUPABASE FIRST
+    # ------------------------------------------------------
+
+    database_downtime_event = {
+        "production_run_id":
+            run[
+                "database_run_id"
+            ],
+
+        "fault_id":
+            fault[
+                "fault_id"
+            ],
+
+        "machine":
+            fault[
+                "machine"
+            ],
+
+        "reason":
+            fault[
+                "reason"
+            ],
+
+        "reported_by":
+            fault[
+                "reported_by"
+            ],
+
+        "engineer_called":
+            (
+                fault[
+                    "engineer_called"
+                ]
+                == "yes"
+            ),
+
+        "production_status":
+            fault[
+                "production_status"
+            ],
+
+        "engineering_status":
+            fault[
+                "engineering_status"
+            ],
+
+        "engineer":
+            fault[
+                "engineer"
+            ],
+
+        "retrospective":
+            fault[
+                "retrospective"
+            ],
+
+        "opened_at":
+            fault[
+                "reported_at"
+            ],
+
+        "resolved_at":
+            None,
+    }
+
+    try:
+        downtime_event_id = (
+            save_downtime_event(
+                database_downtime_event
+            )
+        )
+
+        fault[
+            "database_downtime_event_id"
+        ] = downtime_event_id
+
+        print()
+        print(
+            "Downtime Event saved "
+            "to Supabase."
+        )
+
+        print(
+            f"Downtime Event ID: "
+            f"{downtime_event_id}"
+        )
+
+    except Exception as error:
+        print()
+        print(
+            "DATABASE ERROR"
+        )
+
+        print(
+            "Downtime Event was NOT "
+            "saved to Supabase."
+        )
+
+        print(
+            f"Error: {error}"
+        )
+
+        return
+
+    # ------------------------------------------------------
+    # ENGINEERING RESPONSE
+    # ------------------------------------------------------
 
     if engineer_called == "yes":
         record_event(
@@ -1677,10 +1970,14 @@ def capture_retrospective_downtime(
         "(Yes/No): "
     )
 
+    resolved_at = None
+
     if already_resolved == "yes":
         fault[
             "production_status"
         ] = "Resolved"
+
+        resolved_at = current_timestamp()
 
         record_event(
             run,
@@ -1706,6 +2003,100 @@ def capture_retrospective_downtime(
                 "Resolved",
         )
 
+    database_downtime_event = {
+        "production_run_id":
+            run[
+                "database_run_id"
+            ],
+
+        "fault_id":
+            fault[
+                "fault_id"
+            ],
+
+        "machine":
+            fault[
+                "machine"
+            ],
+
+        "reason":
+            fault[
+                "reason"
+            ],
+
+        "reported_by":
+            fault[
+                "reported_by"
+            ],
+
+        "engineer_called":
+            False,
+
+        "production_status":
+            fault[
+                "production_status"
+            ],
+
+        "engineering_status":
+            fault[
+                "engineering_status"
+            ],
+
+        "engineer":
+            fault[
+                "engineer"
+            ],
+
+        "retrospective":
+            True,
+
+        "opened_at":
+            fault[
+                "reported_at"
+            ],
+
+        "resolved_at":
+            resolved_at,
+    }
+
+    try:
+        downtime_event_id = (
+            save_downtime_event(
+                database_downtime_event
+            )
+        )
+
+        fault[
+            "database_downtime_event_id"
+        ] = downtime_event_id
+
+        print()
+        print(
+            "Retrospective Downtime Event "
+            "saved to Supabase."
+        )
+
+        print(
+            f"Downtime Event ID: "
+            f"{downtime_event_id}"
+        )
+
+    except Exception as error:
+        print()
+        print(
+            "DATABASE ERROR"
+        )
+
+        print(
+            "Retrospective Downtime Event "
+            "was NOT saved to Supabase."
+        )
+
+        print(
+            f"Error: {error}"
+        )
+
+    if already_resolved == "yes":
         run[
             "open_faults"
         ].remove(
@@ -3049,3 +3440,4 @@ def run_session():
 
 if __name__ == "__main__":
     run_session()
+
