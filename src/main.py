@@ -13,6 +13,7 @@ try:
         save_engineering_update,
         get_open_faults,
         get_active_production_run,
+        update_downtime_event_state,
     )
 except ImportError:
     from database import (
@@ -22,6 +23,7 @@ except ImportError:
         save_engineering_update,
         get_open_faults,
         get_active_production_run,
+        update_downtime_event_state,
     )
 
 
@@ -1355,6 +1357,64 @@ def capture_engineering_update(
             f"Error: {error}"
         )
 
+    # ------------------------------------------------------
+    # SYNC PARENT DOWNTIME EVENT IN SUPABASE
+    # ------------------------------------------------------
+    # Engineering status alone does not resolve production.
+
+    try:
+        update_downtime_event_state(
+            downtime_event_id=
+                fault[
+                    "database_downtime_event_id"
+                ],
+
+            engineer_called=
+                (
+                    fault[
+                        "engineer_called"
+                    ]
+                    == "yes"
+                ),
+
+            production_status=
+                fault[
+                    "production_status"
+                ],
+
+            engineering_status=
+                fault[
+                    "engineering_status"
+                ],
+
+            engineer=
+                engineer,
+
+            resolved_at=
+                None,
+        )
+
+        print()
+        print(
+            "Downtime Event engineering state "
+            "saved to Supabase."
+        )
+
+    except Exception as error:
+        print()
+        print(
+            "DATABASE ERROR"
+        )
+
+        print(
+            "Downtime Event engineering state "
+            "was NOT saved to Supabase."
+        )
+
+        print(
+            f"Error: {error}"
+        )
+
     print()
     print(
         "Engineering update recorded."
@@ -1452,6 +1512,56 @@ def ensure_engineer_called(
 
     if engineer_called == "no":
         return False
+
+    try:
+        update_downtime_event_state(
+            downtime_event_id=
+                fault[
+                    "database_downtime_event_id"
+                ],
+
+            engineer_called=
+                True,
+
+            production_status=
+                fault[
+                    "production_status"
+                ],
+
+            engineering_status=
+                fault[
+                    "engineering_status"
+                ],
+
+            engineer=
+                fault[
+                    "engineer"
+                ],
+
+            resolved_at=
+                None,
+        )
+
+        print()
+        print(
+            "Engineer Called status saved "
+            "to Supabase."
+        )
+
+    except Exception as error:
+        print()
+        print(
+            "DATABASE ERROR"
+        )
+
+        print(
+            "Engineer Called status was NOT "
+            "saved to Supabase."
+        )
+
+        print(
+            f"Error: {error}"
+        )
 
     record_event(
         run,
@@ -1815,16 +1925,83 @@ def verify_open_faults(
                     "Resolved",
             )
 
-            resolved_faults.append(
-                fault
-            )
+            # ------------------------------------------------
+            # PERSIST RESOLUTION BEFORE REMOVING FROM MEMORY
+            # The fault must not leave open_faults unless the
+            # database confirms the resolution.
+            # ------------------------------------------------
 
-            print()
-            print(
-                f"Fault #{fault['fault_id']} "
-                "confirmed resolved by "
-                "Line Technician."
-            )
+            try:
+                update_downtime_event_state(
+                    downtime_event_id=
+                        fault[
+                            "database_downtime_event_id"
+                        ],
+
+                    engineer_called=
+                        (
+                            fault[
+                                "engineer_called"
+                            ]
+                            == "yes"
+                        ),
+
+                    production_status=
+                        "Resolved",
+
+                    engineering_status=
+                        fault[
+                            "engineering_status"
+                        ],
+
+                    engineer=
+                        fault[
+                            "engineer"
+                        ],
+
+                    resolved_at=
+                        current_timestamp(),
+                )
+
+                print()
+                print(
+                    "Downtime Event resolution "
+                    "saved to Supabase."
+                )
+
+                resolved_faults.append(
+                    fault
+                )
+
+                print()
+                print(
+                    f"Fault #{fault['fault_id']} "
+                    "confirmed resolved by "
+                    "Line Technician."
+                )
+
+            except Exception as error:
+                print()
+                print(
+                    "DATABASE ERROR"
+                )
+
+                print(
+                    "Downtime Event resolution "
+                    "was NOT saved to Supabase."
+                )
+
+                print(
+                    f"Error: {error}"
+                )
+
+                print()
+                print(
+                    f"Fault #{fault['fault_id']} "
+                    "remains in the open fault "
+                    "list because the database "
+                    "update failed."
+                )
 
             continue
 
@@ -1868,6 +2045,59 @@ def verify_open_faults(
             f"Fault #{fault['fault_id']} "
             "is still ongoing."
         )
+
+        try:
+            update_downtime_event_state(
+                downtime_event_id=
+                    fault[
+                        "database_downtime_event_id"
+                    ],
+
+                engineer_called=
+                    (
+                        fault[
+                            "engineer_called"
+                        ]
+                        == "yes"
+                    ),
+
+                production_status=
+                    "Ongoing",
+
+                engineering_status=
+                    fault[
+                        "engineering_status"
+                    ],
+
+                engineer=
+                    fault[
+                        "engineer"
+                    ],
+
+                resolved_at=
+                    None,
+            )
+
+            print()
+            print(
+                "Downtime Event status saved "
+                "to Supabase."
+            )
+
+        except Exception as error:
+            print()
+            print(
+                "DATABASE ERROR"
+            )
+
+            print(
+                "Downtime Event status was NOT "
+                "saved to Supabase."
+            )
+
+            print(
+                f"Error: {error}"
+            )
 
         newly_called = (
             ensure_engineer_called(
