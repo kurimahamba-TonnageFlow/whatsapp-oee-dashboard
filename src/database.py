@@ -280,6 +280,8 @@ def get_active_production_run(production_line):
             pallets_remaining,
             previous_run_completed,
             total_pallets_completed,
+            potential_overrun_pallets,
+            confirmed_overrun_pallets,
             status,
             started_at
         FROM public.production_runs
@@ -299,6 +301,59 @@ def get_active_production_run(production_line):
             active_run = cursor.fetchone()
 
     return active_run
+
+def update_production_run_progress(
+    production_run_id,
+    pallets_remaining,
+    total_pallets_completed,
+    potential_overrun_pallets,
+    confirmed_overrun_pallets,
+):
+    query = """
+        UPDATE public.production_runs
+        SET
+            pallets_remaining = %(pallets_remaining)s,
+            total_pallets_completed = %(total_pallets_completed)s,
+            potential_overrun_pallets = %(potential_overrun_pallets)s,
+            confirmed_overrun_pallets = %(confirmed_overrun_pallets)s
+        WHERE id = %(production_run_id)s
+        RETURNING id;
+    """
+
+    update = {
+        "production_run_id":
+            production_run_id,
+
+        "pallets_remaining":
+            pallets_remaining,
+
+        "total_pallets_completed":
+            total_pallets_completed,
+
+        "potential_overrun_pallets":
+            potential_overrun_pallets,
+
+        "confirmed_overrun_pallets":
+            confirmed_overrun_pallets,
+    }
+
+    with get_database_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                query,
+                update,
+            )
+
+            updated_run = cursor.fetchone()
+
+        connection.commit()
+
+    if updated_run is None:
+        raise RuntimeError(
+            "Production Run progress was not updated."
+        )
+
+    return updated_run[0]
 
 def update_downtime_event_state(
     downtime_event_id,

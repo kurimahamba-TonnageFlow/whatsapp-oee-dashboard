@@ -14,6 +14,7 @@ try:
         get_open_faults,
         get_active_production_run,
         update_downtime_event_state,
+        update_production_run_progress,
     )
 except ImportError:
     from database import (
@@ -24,6 +25,7 @@ except ImportError:
         get_open_faults,
         get_active_production_run,
         update_downtime_event_state,
+        update_production_run_progress,
     )
 
 
@@ -726,6 +728,7 @@ def recover_production_run(production_line):
 
     run["database_run_id"] = database_run["id"]
     run["open_faults"] = open_faults
+    run["events"] = []
 
     if open_faults:
         run["next_fault_id"] = (
@@ -2644,6 +2647,61 @@ def update_run_progress(
     ] += potential_overrun
 
 
+def persist_run_progress(run):
+    try:
+        update_production_run_progress(
+            production_run_id=
+                run[
+                    "database_run_id"
+                ],
+
+            pallets_remaining=
+                run[
+                    "pallets_remaining"
+                ],
+
+            total_pallets_completed=
+                run[
+                    "total_pallets_completed"
+                ],
+
+            potential_overrun_pallets=
+                run[
+                    "potential_overrun_pallets"
+                ],
+
+            confirmed_overrun_pallets=
+                run[
+                    "confirmed_overrun_pallets"
+                ],
+        )
+
+        print()
+        print(
+            "Production Run progress "
+            "saved to Supabase."
+        )
+
+        return True
+
+    except Exception as error:
+        print()
+        print(
+            "DATABASE ERROR"
+        )
+
+        print(
+            "Production Run progress "
+            "was NOT saved to Supabase."
+        )
+
+        print(
+            f"Error: {error}"
+        )
+
+        return False
+
+
 # ==========================================================
 # HOURLY REPORT
 # ==========================================================
@@ -2898,6 +2956,10 @@ def handle_run_completion(
             "potential_overrun_pallets"
         ]
 
+        persist_run_progress(
+            run
+        )
+
         record_event(
             run,
             "Changeover",
@@ -2947,6 +3009,10 @@ def handle_run_completion(
             "confirmed_overrun_pallets"
         ] = 0
 
+        persist_run_progress(
+            run
+        )
+
         record_event(
             run,
             "Changeover",
@@ -2995,6 +3061,10 @@ def handle_run_completion(
     run[
         "confirmed_overrun_pallets"
     ] = 0
+
+    persist_run_progress(
+        run
+    )
 
     record_event(
         run,
@@ -3477,6 +3547,8 @@ def run_session():
                     ],
             }
 
+            history_saved = False
+
             try:
                 hourly_update_id = (
                     save_hourly_update(
@@ -3487,6 +3559,8 @@ def run_session():
                 hourly_update[
                     "database_hourly_update_id"
                 ] = hourly_update_id
+
+                history_saved = True
 
                 print()
                 print(
@@ -3512,6 +3586,45 @@ def run_session():
 
                 print(
                     f"Error: {error}"
+                )
+
+            # ------------------------------------------------
+            # PRODUCTION RUN CURRENT-STATE SNAPSHOT
+            # ------------------------------------------------
+            # Only attempted when the Hourly Update history
+            # write succeeded, so the snapshot can never move
+            # ahead of what history actually recorded.
+
+            if history_saved:
+                progress_saved = (
+                    persist_run_progress(
+                        production_run
+                    )
+                )
+
+                if not progress_saved:
+                    print()
+                    print(
+                        "WARNING: Hourly Update history "
+                        "was saved, but the Production Run "
+                        "progress snapshot was NOT updated "
+                        "to match it."
+                    )
+
+                    print(
+                        "Production Run history and "
+                        "current-state snapshot are now "
+                        "out of sync. Recovery will return "
+                        "stale progress until this is "
+                        "corrected."
+                    )
+
+            else:
+                print()
+                print(
+                    "Production Run progress snapshot "
+                    "was NOT updated because the Hourly "
+                    "Update history failed to save."
                 )
 
             display_hourly_report(
