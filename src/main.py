@@ -15,6 +15,7 @@ try:
         get_active_production_run,
         update_downtime_event_state,
         update_production_run_progress,
+        close_production_run,
     )
 except ImportError:
     from database import (
@@ -26,6 +27,7 @@ except ImportError:
         get_active_production_run,
         update_downtime_event_state,
         update_production_run_progress,
+        close_production_run,
     )
 
 
@@ -729,6 +731,13 @@ def recover_production_run(production_line):
     run["database_run_id"] = database_run["id"]
     run["open_faults"] = open_faults
     run["events"] = []
+
+    for label, kg in pack_sizes_by_line.get(
+        run["production_line"], {}
+    ).items():
+        if kg == run["pack_weight_kg"]:
+            run["pack_weight"] = label
+            break
 
     if open_faults:
         run["next_fault_id"] = (
@@ -3708,6 +3717,85 @@ def run_session():
         handle_run_completion(
             production_run
         )
+
+        # ------------------------------------------------------
+        # FINAL CLOSURE GATE
+        # ------------------------------------------------------
+        # A Production Run must not be marked Completed unless
+        # its final progress snapshot has safely persisted first.
+        # This write is intentional even though
+        # handle_run_completion() already persisted progress -
+        # it proves the final in-memory state is safely stored
+        # immediately before status changes.
+
+        final_progress_saved = (
+            persist_run_progress(
+                production_run
+            )
+        )
+
+        run_closed_safely = False
+
+        if final_progress_saved:
+            try:
+                close_production_run(
+                    production_run[
+                        "database_run_id"
+                    ],
+                    current_timestamp(),
+                )
+
+                run_closed_safely = True
+
+                print()
+                print(
+                    "Production Run marked "
+                    "Completed in Supabase."
+                )
+
+            except Exception as error:
+                print()
+                print(
+                    "DATABASE ERROR"
+                )
+
+                print(
+                    "Production Run was NOT "
+                    "marked Completed."
+                )
+
+                print(
+                    f"Error: {error}"
+                )
+
+                print()
+                print(
+                    "The Production Run remains "
+                    "Active in Supabase. A new "
+                    "Production Run cannot safely "
+                    "start on this Production Line "
+                    "until this is corrected."
+                )
+
+        else:
+            print()
+            print(
+                "WARNING: Final Production Run "
+                "progress could not be safely "
+                "confirmed in Supabase."
+            )
+
+            print(
+                "The Production Run remains "
+                "Active in Supabase. A new "
+                "Production Run must not be "
+                "started on this Production Line "
+                "until this is corrected."
+            )
+
+        if not run_closed_safely:
+            tracking_finished = True
+            continue
 
         section(
             "Production Run Closed"

@@ -355,6 +355,45 @@ def update_production_run_progress(
 
     return updated_run[0]
 
+def close_production_run(
+    production_run_id,
+    finished_at,
+):
+    query = """
+        UPDATE public.production_runs
+        SET
+            status = 'Completed',
+            finished_at = %(finished_at)s
+        WHERE id = %(production_run_id)s
+        RETURNING id;
+    """
+
+    update = {
+        "production_run_id":
+            production_run_id,
+
+        "finished_at":
+            finished_at,
+    }
+
+    with get_database_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                query,
+                update,
+            )
+
+            closed_run = cursor.fetchone()
+
+        connection.commit()
+
+    if closed_run is None:
+        raise RuntimeError(
+            "Production Run was not closed."
+        )
+
+    return closed_run[0]
+
 def update_downtime_event_state(
     downtime_event_id,
     engineer_called,
