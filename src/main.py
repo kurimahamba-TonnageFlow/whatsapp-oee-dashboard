@@ -16,6 +16,7 @@ try:
         update_downtime_event_state,
         update_production_run_progress,
         close_production_run,
+        save_changeover_type,
     )
 except ImportError:
     from database import (
@@ -28,6 +29,7 @@ except ImportError:
         update_downtime_event_state,
         update_production_run_progress,
         close_production_run,
+        save_changeover_type,
     )
 
 
@@ -45,25 +47,27 @@ UNEXPLAINED_LOSS_MINUTES_THRESHOLD = 10.0
 # FACTORY DATA
 # ==========================================================
 
+# No confirmed line-specific technician assignments exist yet: every
+# technician below is valid on every Production Line.
+_all_line_technicians = [
+    "Marina",
+    "Mariusz",
+    "Liam",
+    "Ben",
+    "Tomasz",
+    "Sumit",
+    "Gurpreet",
+    "Baljeet",
+    "Pali",
+    "Diego",
+    "Seb",
+    "Bupreet",
+]
+
 line_technicians_by_line = {
-    "Rovema": [
-        "Liam",
-        "Rovema Technician 2",
-        "Rovema Technician 3",
-        "Rovema Technician 4",
-    ],
-    "GIC": [
-        "GIC Technician 1",
-        "GIC Technician 2",
-        "GIC Technician 3",
-        "GIC Technician 4",
-    ],
-    "Guill": [
-        "Guill Technician 1",
-        "Guill Technician 2",
-        "Guill Technician 3",
-        "Guill Technician 4",
-    ],
+    "Rovema": list(_all_line_technicians),
+    "GIC": list(_all_line_technicians),
+    "Guill": list(_all_line_technicians),
 }
 
 
@@ -2395,6 +2399,14 @@ def collect_hourly_update(
         )
     )
 
+    planned_downtime_minutes = 0
+
+    if planned_downtime != "None":
+        planned_downtime_minutes = get_int(
+            "Minutes spent on this: ",
+            minimum=1,
+        )
+
     fault_summary = {
         "verified_faults":
             0,
@@ -2430,6 +2442,9 @@ def collect_hourly_update(
 
         "planned_downtime":
             planned_downtime,
+
+        "planned_downtime_minutes":
+            planned_downtime_minutes,
 
         "verified_faults":
             fault_summary[
@@ -2947,6 +2962,35 @@ def handle_run_completion(
     run[
         "changeover_type"
     ] = changeover_type
+
+    try:
+        save_changeover_type(
+            run[
+                "database_run_id"
+            ],
+            changeover_type,
+        )
+
+        print()
+        print(
+            "Changeover type saved "
+            "to Supabase."
+        )
+
+    except Exception as error:
+        print()
+        print(
+            "DATABASE ERROR"
+        )
+
+        print(
+            "Changeover type was NOT "
+            "saved to Supabase."
+        )
+
+        print(
+            f"Error: {error}"
+        )
 
     # ------------------------------------------------------
     # PRODUCT CHANGEOVER
@@ -3503,6 +3547,11 @@ def run_session():
                 "planned_downtime":
                     hourly_update[
                         "planned_downtime"
+                    ],
+
+                "planned_downtime_minutes":
+                    hourly_update[
+                        "planned_downtime_minutes"
                     ],
 
                 "expected_packs":

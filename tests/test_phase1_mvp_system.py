@@ -180,7 +180,7 @@ def apply_hourly_cycle(run, label):
 
 scripted_input.extend(
     "GIC",                            # Select Production Line
-    "GIC Technician 1",               # Select Line Technician
+    "Marina",                         # Select Line Technician
     "TEST-SHIFT",                     # Shift
     "TEST-PHASE1-MVP-SYSTEM",         # Customer
     "TEST-PRODUCT-DO-NOT-USE",        # Product
@@ -434,7 +434,7 @@ checkpoint("recover_production_run returns None", None, main.recover_production_
 
 scripted_input.extend(
     "GIC",
-    "GIC Technician 2",
+    "Mariusz",
     "TEST-SHIFT-2",
     "TEST-PHASE1-MVP-SYSTEM-2",
     "TEST-PRODUCT-DO-NOT-USE",
