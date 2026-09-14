@@ -15,3 +15,9 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/
+
+# WhatsApp Web Observer persistent browser profile (local only)
+.pulse_browser_profile/
+
+# WhatsApp Web Observer Phase 2 shadow-mode message inbox (local only)
+.pulse_shadow_inbox/
