@@ -5,6 +5,45 @@ tree). This note is for whoever maintains the HMI at
 https://tonnage-flow-pulse-hmi.kurirai-mahamba.chatgpt.site so it can call
 the new endpoint.
 
+## Line / machine / button configuration (new)
+
+```
+GET {PULSE_API_BASE_URL}/api/v1/hmi/config
+```
+
+No authentication required. Returns only **active** lines → machines →
+buttons - never disabled rows, Management data, or credentials:
+
+```json
+{
+  "lines": [
+    {
+      "id": 1,
+      "name": "Rovema",
+      "machines": [
+        {
+          "id": 5,
+          "name": "BV1",
+          "buttons": [
+            {"id": 20, "name": "Film Jam", "event_type": "unplanned_fault", "ownership": "Production", "fault_category": null},
+            {"id": 21, "name": "Film Change", "event_type": "planned_downtime", "ownership": "Production", "fault_category": null}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+`event_type` is `"planned_downtime"` or `"unplanned_fault"`;
+`ownership` is `"Production"` or `"Engineering"` (matches the existing
+Engineering-access split). The HMI should poll this on load and on
+refresh so a button a manager just added in the new Management area
+(see `docs/management_integration.md`) appears without republishing
+the HMI. **Once this is wired in, remove any hard-coded machine/button
+lists from the HMI's browser JavaScript** - they should come from this
+endpoint only.
+
 ## Endpoint
 
 ```

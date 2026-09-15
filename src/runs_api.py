@@ -17,11 +17,21 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 try:
-    from .database import get_active_production_run, save_production_run
-    from .main import line_technicians_by_line
+    from .database import (
+        close_production_run,
+        get_active_production_run,
+        get_production_run_by_id,
+        save_production_run,
+    )
+    from .main import current_timestamp, line_technicians_by_line
 except ImportError:
-    from database import get_active_production_run, save_production_run
-    from main import line_technicians_by_line
+    from database import (
+        close_production_run,
+        get_active_production_run,
+        get_production_run_by_id,
+        save_production_run,
+    )
+    from main import current_timestamp, line_technicians_by_line
 
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
@@ -195,3 +205,57 @@ def start_run(payload: StartRunRequest):
 
     finally:
         lock.release()
+
+
+# ==========================================================
+# COMPLETE RUN
+# ==========================================================
+
+
+@router.post("/runs/{run_id}/complete", status_code=200)
+def complete_run(run_id: int):
+    try:
+        run = get_production_run_by_id(run_id)
+
+    except Exception:
+        print("DATABASE ERROR")
+        print("Could not look up the Production Run to complete.")
+
+        raise HTTPException(
+            status_code=503,
+            detail="Could not verify the Production Run. Please try again.",
+        )
+
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Production Run {run_id} was not found.",
+        )
+
+    if run["status"] == "Completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Production Run {run_id} is already completed.",
+        )
+
+    finished_at = current_timestamp()
+
+    try:
+        closed_id = close_production_run(run_id, finished_at)
+
+    except Exception:
+        print("DATABASE ERROR")
+        print("Production Run was NOT marked as completed.")
+
+        raise HTTPException(
+            status_code=503,
+            detail="Could not complete the Production Run. Please try again.",
+        )
+
+    return {
+        "status": "success",
+        "message": "Run completed",
+        "run_id": closed_id,
+        "production_line": run["production_line"],
+        "run_status": "Completed",
+    }

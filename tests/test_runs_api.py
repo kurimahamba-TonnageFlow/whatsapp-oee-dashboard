@@ -342,6 +342,95 @@ def test_cors_rejects_other_origins():
 
 
 # ==========================================================
+# COMPLETE RUN
+# ==========================================================
+
+
+def test_complete_run_success(monkeypatch):
+    monkeypatch.setattr(
+        runs_api,
+        "get_production_run_by_id",
+        lambda run_id: {"id": run_id, "production_line": "GIC", "status": "Active"},
+    )
+    monkeypatch.setattr(runs_api, "close_production_run", lambda run_id, finished_at: run_id)
+
+    response = client.post("/api/v1/runs/24/complete")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["run_id"] == 24
+    assert body["production_line"] == "GIC"
+    assert body["run_status"] == "Completed"
+
+
+def test_complete_run_returns_404_for_unknown_run(monkeypatch):
+    monkeypatch.setattr(runs_api, "get_production_run_by_id", lambda run_id: None)
+
+    close_called = {"count": 0}
+    monkeypatch.setattr(
+        runs_api,
+        "close_production_run",
+        lambda run_id, finished_at: close_called.update(count=close_called["count"] + 1),
+    )
+
+    response = client.post("/api/v1/runs/999999/complete")
+
+    assert response.status_code == 404
+    assert close_called["count"] == 0
+
+
+def test_complete_run_returns_409_when_already_completed(monkeypatch):
+    monkeypatch.setattr(
+        runs_api,
+        "get_production_run_by_id",
+        lambda run_id: {"id": run_id, "production_line": "Rovema", "status": "Completed"},
+    )
+
+    close_called = {"count": 0}
+    monkeypatch.setattr(
+        runs_api,
+        "close_production_run",
+        lambda run_id, finished_at: close_called.update(count=close_called["count"] + 1),
+    )
+
+    response = client.post("/api/v1/runs/10/complete")
+
+    assert response.status_code == 409
+    assert close_called["count"] == 0
+
+
+def test_complete_run_returns_safe_error_when_lookup_fails(monkeypatch, capsys):
+    def fake_lookup(run_id):
+        raise RuntimeError(SENSITIVE_ERROR_TEXT)
+
+    monkeypatch.setattr(runs_api, "get_production_run_by_id", fake_lookup)
+
+    response = client.post("/api/v1/runs/24/complete")
+
+    assert response.status_code == 503
+    _assert_no_sensitive_text_anywhere(response, capsys.readouterr())
+
+
+def test_complete_run_returns_safe_error_when_close_fails(monkeypatch, capsys):
+    monkeypatch.setattr(
+        runs_api,
+        "get_production_run_by_id",
+        lambda run_id: {"id": run_id, "production_line": "Guill", "status": "Active"},
+    )
+
+    def fake_close(run_id, finished_at):
+        raise RuntimeError(SENSITIVE_ERROR_TEXT)
+
+    monkeypatch.setattr(runs_api, "close_production_run", fake_close)
+
+    response = client.post("/api/v1/runs/12/complete")
+
+    assert response.status_code == 503
+    _assert_no_sensitive_text_anywhere(response, capsys.readouterr())
+
+
+# ==========================================================
 # EXISTING WHATSAPP ROUTES STILL WORK (THROUGH THE COMPOSED APP)
 # ==========================================================
 

@@ -21,10 +21,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 try:
     from .dashboard_api import router as dashboard_router
+    from .hmi_config_api import router as hmi_config_router
+    from .management_api import router as management_router
     from .runs_api import router as runs_router
     from .whatsapp_webhook import app as whatsapp_app
 except ImportError:
     from dashboard_api import router as dashboard_router
+    from hmi_config_api import router as hmi_config_router
+    from management_api import router as management_router
     from runs_api import router as runs_router
     from whatsapp_webhook import app as whatsapp_app
 
@@ -55,8 +59,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[HMI_ORIGIN, DASHBOARD_ORIGIN],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
@@ -66,6 +70,8 @@ app.add_middleware(
 
 app.include_router(dashboard_router)
 app.include_router(runs_router)
+app.include_router(management_router)
+app.include_router(hmi_config_router)
 
 # Mounted last, at root, so the explicit routes above always take
 # priority; every other path (including /health and /webhooks/whatsapp)

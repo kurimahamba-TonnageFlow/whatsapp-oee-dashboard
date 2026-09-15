@@ -2,6 +2,7 @@ import os
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Json
 from dotenv import load_dotenv
 
 
@@ -394,6 +395,27 @@ def save_changeover_type(
         )
 
     return updated_run[0]
+
+
+def get_production_run_by_id(production_run_id):
+    """Plain, unfiltered lookup by id - unlike the dashboard read
+    functions, this does NOT exclude TEST- rows, since operational
+    endpoints (e.g. completing a run) must see every real row
+    regardless of naming convention."""
+    query = """
+        SELECT
+            id,
+            production_line,
+            status
+        FROM public.production_runs
+        WHERE id = %(production_run_id)s
+        LIMIT 1;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, {"production_run_id": production_run_id})
+            return cursor.fetchone()
 
 
 def close_production_run(
@@ -1154,3 +1176,630 @@ def get_dashboard_summary(filters=None):
         "machine_repair_minutes": None,
         "machine_classification_status": "not_captured",
     }
+
+
+# ==========================================================
+# MANAGEMENT AREA
+# ==========================================================
+#
+# Config tables (production_lines, machines, buttons) and the audit
+# log are new, additive tables (see migrations/0001_management_area.sql).
+# Disable/rename operations are always UPDATE, never DELETE, so
+# historical downtime_events/engineering_updates rows (which reference
+# machines only by free-text `machine` name, not a foreign key) stay
+# valid regardless of later renames.
+#
+# Deliberately NOT applying _TEST_DATA_EXCLUSION_SQL here: Management
+# must be able to see and force-close TEST-marked runs too (this is
+# exactly the manual process used earlier to clear stuck test runs).
+
+
+# ----------------------------------------------------------
+# PRODUCTION LINES
+# ----------------------------------------------------------
+
+
+def list_production_lines():
+    query = """
+        SELECT id, name, active, display_order, created_at, updated_at
+        FROM public.production_lines
+        ORDER BY display_order, name;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query)
+            return cursor.fetchall()
+
+
+def get_production_line(line_id):
+    query = """
+        SELECT id, name, active, display_order, created_at, updated_at
+        FROM public.production_lines
+        WHERE id = %(line_id)s
+        LIMIT 1;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, {"line_id": line_id})
+            return cursor.fetchone()
+
+
+def create_production_line(name, display_order=0):
+    query = """
+        INSERT INTO public.production_lines (name, display_order)
+        VALUES (%(name)s, %(display_order)s)
+        RETURNING id, name, active, display_order, created_at, updated_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, {"name": name, "display_order": display_order})
+            created = cursor.fetchone()
+
+        connection.commit()
+
+    return created
+
+
+def update_production_line(line_id, name=None, active=None, display_order=None):
+    fields = []
+    params = {"line_id": line_id}
+
+    if name is not None:
+        fields.append("name = %(name)s")
+        params["name"] = name
+
+    if active is not None:
+        fields.append("active = %(active)s")
+        params["active"] = active
+
+    if display_order is not None:
+        fields.append("display_order = %(display_order)s")
+        params["display_order"] = display_order
+
+    fields.append("updated_at = now()")
+
+    query = f"""
+        UPDATE public.production_lines
+        SET {", ".join(fields)}
+        WHERE id = %(line_id)s
+        RETURNING id, name, active, display_order, created_at, updated_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, params)
+            updated = cursor.fetchone()
+
+        connection.commit()
+
+    return updated
+
+
+# ----------------------------------------------------------
+# MACHINES / SECTIONS
+# ----------------------------------------------------------
+
+
+def list_machines(line_id):
+    query = """
+        SELECT id, production_line_id, name, active, display_order, created_at, updated_at
+        FROM public.machines
+        WHERE production_line_id = %(line_id)s
+        ORDER BY display_order, name;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, {"line_id": line_id})
+            return cursor.fetchall()
+
+
+def get_machine(machine_id):
+    query = """
+        SELECT id, production_line_id, name, active, display_order, created_at, updated_at
+        FROM public.machines
+        WHERE id = %(machine_id)s
+        LIMIT 1;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, {"machine_id": machine_id})
+            return cursor.fetchone()
+
+
+def create_machine(line_id, name, display_order=0):
+    query = """
+        INSERT INTO public.machines (production_line_id, name, display_order)
+        VALUES (%(line_id)s, %(name)s, %(display_order)s)
+        RETURNING id, production_line_id, name, active, display_order, created_at, updated_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                query,
+                {"line_id": line_id, "name": name, "display_order": display_order},
+            )
+            created = cursor.fetchone()
+
+        connection.commit()
+
+    return created
+
+
+def update_machine(machine_id, name=None, active=None, display_order=None):
+    fields = []
+    params = {"machine_id": machine_id}
+
+    if name is not None:
+        fields.append("name = %(name)s")
+        params["name"] = name
+
+    if active is not None:
+        fields.append("active = %(active)s")
+        params["active"] = active
+
+    if display_order is not None:
+        fields.append("display_order = %(display_order)s")
+        params["display_order"] = display_order
+
+    fields.append("updated_at = now()")
+
+    query = f"""
+        UPDATE public.machines
+        SET {", ".join(fields)}
+        WHERE id = %(machine_id)s
+        RETURNING id, production_line_id, name, active, display_order, created_at, updated_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, params)
+            updated = cursor.fetchone()
+
+        connection.commit()
+
+    return updated
+
+
+# ----------------------------------------------------------
+# FAULT / PLANNED-DOWNTIME BUTTONS
+# ----------------------------------------------------------
+
+
+def list_buttons(machine_id):
+    query = """
+        SELECT
+            id, machine_id, name, event_type, ownership, fault_category,
+            display_order, active, created_at, updated_at
+        FROM public.buttons
+        WHERE machine_id = %(machine_id)s
+        ORDER BY display_order, name;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, {"machine_id": machine_id})
+            return cursor.fetchall()
+
+
+def get_button(button_id):
+    query = """
+        SELECT
+            id, machine_id, name, event_type, ownership, fault_category,
+            display_order, active, created_at, updated_at
+        FROM public.buttons
+        WHERE id = %(button_id)s
+        LIMIT 1;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, {"button_id": button_id})
+            return cursor.fetchone()
+
+
+def create_button(
+    machine_id,
+    name,
+    event_type,
+    ownership,
+    fault_category=None,
+    display_order=0,
+):
+    query = """
+        INSERT INTO public.buttons (
+            machine_id, name, event_type, ownership, fault_category, display_order
+        )
+        VALUES (
+            %(machine_id)s, %(name)s, %(event_type)s, %(ownership)s,
+            %(fault_category)s, %(display_order)s
+        )
+        RETURNING
+            id, machine_id, name, event_type, ownership, fault_category,
+            display_order, active, created_at, updated_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                query,
+                {
+                    "machine_id": machine_id,
+                    "name": name,
+                    "event_type": event_type,
+                    "ownership": ownership,
+                    "fault_category": fault_category,
+                    "display_order": display_order,
+                },
+            )
+            created = cursor.fetchone()
+
+        connection.commit()
+
+    return created
+
+
+def update_button(
+    button_id,
+    name=None,
+    event_type=None,
+    ownership=None,
+    fault_category=None,
+    display_order=None,
+    active=None,
+):
+    # Note: passing None for fault_category means "leave unchanged", not
+    # "clear it" - there is no way to blank an existing fault_category via
+    # this dynamic-update pattern (matches how every other optional field
+    # here behaves). Not needed for the MVP; documented as a limitation.
+    fields = []
+    params = {"button_id": button_id}
+
+    if name is not None:
+        fields.append("name = %(name)s")
+        params["name"] = name
+
+    if event_type is not None:
+        fields.append("event_type = %(event_type)s")
+        params["event_type"] = event_type
+
+    if ownership is not None:
+        fields.append("ownership = %(ownership)s")
+        params["ownership"] = ownership
+
+    if fault_category is not None:
+        fields.append("fault_category = %(fault_category)s")
+        params["fault_category"] = fault_category
+
+    if display_order is not None:
+        fields.append("display_order = %(display_order)s")
+        params["display_order"] = display_order
+
+    if active is not None:
+        fields.append("active = %(active)s")
+        params["active"] = active
+
+    fields.append("updated_at = now()")
+
+    query = f"""
+        UPDATE public.buttons
+        SET {", ".join(fields)}
+        WHERE id = %(button_id)s
+        RETURNING
+            id, machine_id, name, event_type, ownership, fault_category,
+            display_order, active, created_at, updated_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, params)
+            updated = cursor.fetchone()
+
+        connection.commit()
+
+    return updated
+
+
+# ----------------------------------------------------------
+# PUBLIC HMI CONFIGURATION (read-only, active rows only)
+# ----------------------------------------------------------
+
+
+def get_public_hmi_config():
+    """Flat rows of every active line -> active machine -> active button.
+    The API layer assembles these into a nested tree. A line with no
+    active machines, or a machine with no active buttons, still appears
+    (via LEFT JOIN) with null machine_id/button_id fields."""
+    query = """
+        SELECT
+            pl.id AS line_id,
+            pl.name AS line_name,
+            pl.display_order AS line_display_order,
+            m.id AS machine_id,
+            m.name AS machine_name,
+            m.display_order AS machine_display_order,
+            b.id AS button_id,
+            b.name AS button_name,
+            b.event_type,
+            b.ownership,
+            b.fault_category,
+            b.display_order AS button_display_order
+        FROM public.production_lines AS pl
+        LEFT JOIN public.machines AS m
+            ON m.production_line_id = pl.id AND m.active = true
+        LEFT JOIN public.buttons AS b
+            ON b.machine_id = m.id AND b.active = true
+        WHERE pl.active = true
+        ORDER BY
+            pl.display_order, pl.name,
+            m.display_order, m.name,
+            b.display_order, b.name;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query)
+            return cursor.fetchall()
+
+
+# ----------------------------------------------------------
+# ACTIVE RUNS (ACROSS ALL LINES) + FORCE CLOSE
+# ----------------------------------------------------------
+
+
+def get_all_active_runs():
+    query = """
+        SELECT
+            id,
+            production_line,
+            line_technician,
+            shift,
+            customer,
+            product,
+            status,
+            started_at
+        FROM public.production_runs
+        WHERE status = 'Active'
+        ORDER BY started_at DESC;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query)
+            return cursor.fetchall()
+
+
+def force_close_production_run(production_run_id, finished_at):
+    """Atomic check-and-set: only closes a row that is still Active.
+    This is the concurrency protection - if two managers force-close the
+    same run at once, only one UPDATE matches a row (the partial unique
+    index idx_unique_active_run_per_line already guarantees at most one
+    Active row per line, and this WHERE clause guarantees at most one
+    UPDATE can transition it away from Active). Returns None if no
+    Active row matched (never existed, or already closed by someone
+    else) - the caller does one cheap get_production_run_by_id lookup
+    to tell those two cases apart for the HTTP response."""
+    query = """
+        UPDATE public.production_runs
+        SET
+            status = 'Cancelled',
+            finished_at = %(finished_at)s
+        WHERE id = %(production_run_id)s
+          AND status = 'Active'
+        RETURNING id, production_line, status, finished_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                query,
+                {"production_run_id": production_run_id, "finished_at": finished_at},
+            )
+            closed = cursor.fetchone()
+
+        connection.commit()
+
+    return closed
+
+
+# ----------------------------------------------------------
+# AUDIT LOG
+# ----------------------------------------------------------
+
+
+def insert_audit_log(
+    action,
+    manager_name,
+    record_type,
+    record_id,
+    previous_value=None,
+    new_value=None,
+    reason=None,
+):
+    query = """
+        INSERT INTO public.management_audit_log (
+            action, manager_name, record_type, record_id,
+            previous_value, new_value, reason
+        )
+        VALUES (
+            %(action)s, %(manager_name)s, %(record_type)s, %(record_id)s,
+            %(previous_value)s, %(new_value)s, %(reason)s
+        )
+        RETURNING id, created_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                query,
+                {
+                    "action": action,
+                    "manager_name": manager_name,
+                    "record_type": record_type,
+                    "record_id": str(record_id) if record_id is not None else None,
+                    "previous_value": Json(previous_value) if previous_value is not None else None,
+                    "new_value": Json(new_value) if new_value is not None else None,
+                    "reason": reason,
+                },
+            )
+            created = cursor.fetchone()
+
+        connection.commit()
+
+    return created
+
+
+# ----------------------------------------------------------
+# TECHNICIAN PERFORMANCE
+# ----------------------------------------------------------
+
+
+def get_technician_performance(filters=None):
+    """Grouped by line_technician. Reuses the same filter builders (and
+    therefore the same test-data exclusion) as the Dashboard section
+    above. Callers should pass filters={"run_status": "Completed", ...}
+    to restrict to finished runs only."""
+    run_conditions, run_params = _run_conditions(filters)
+    run_where = " AND ".join(run_conditions)
+
+    hourly_conditions, hourly_params = _hourly_conditions(filters)
+    hourly_where = " AND ".join(hourly_conditions)
+
+    fault_conditions, fault_params = _fault_conditions(filters)
+    fault_where = " AND ".join(fault_conditions)
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    pr.line_technician,
+                    COUNT(*) AS completed_runs,
+                    COUNT(*) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1 FROM public.hourly_updates hu
+                            WHERE hu.production_run_id = pr.id
+                        )
+                    ) AS runs_with_data,
+                    ARRAY_AGG(DISTINCT pr.production_line) AS lines,
+                    ARRAY_AGG(DISTINCT pr.shift) AS shifts,
+                    ARRAY_AGG(DISTINCT pr.product) AS products,
+                    ARRAY_AGG(DISTINCT pr.customer) AS customers,
+                    ARRAY_AGG(pr.id ORDER BY pr.id) AS run_ids
+                FROM public.production_runs AS pr
+                WHERE {run_where}
+                GROUP BY pr.line_technician;
+                """,
+                run_params,
+            )
+            run_rows = {row["line_technician"]: row for row in cursor.fetchall()}
+
+            cursor.execute(
+                f"""
+                SELECT
+                    pr.line_technician,
+                    COALESCE(SUM(hu.expected_pallets), 0) AS expected_pallets,
+                    COALESCE(SUM(hu.actual_pallets), 0) AS actual_pallets,
+                    COALESCE(
+                        SUM(
+                            hu.expected_pallets
+                            * pr.cases_per_pallet
+                            * pr.packs_per_case
+                            * pr.pack_weight_kg
+                        ) / 1000.0,
+                        0
+                    ) AS expected_tonnes,
+                    COALESCE(
+                        SUM(
+                            hu.actual_pallets
+                            * pr.cases_per_pallet
+                            * pr.packs_per_case
+                            * pr.pack_weight_kg
+                        ) / 1000.0,
+                        0
+                    ) AS actual_tonnes,
+                    COALESCE(SUM(hu.planned_downtime_minutes), 0) AS planned_downtime_minutes
+                FROM public.hourly_updates AS hu
+                JOIN public.production_runs AS pr ON pr.id = hu.production_run_id
+                WHERE {hourly_where}
+                GROUP BY pr.line_technician;
+                """,
+                hourly_params,
+            )
+            hourly_rows = {row["line_technician"]: row for row in cursor.fetchall()}
+
+            cursor.execute(
+                f"""
+                SELECT
+                    pr.line_technician,
+                    COALESCE(
+                        SUM(
+                            EXTRACT(
+                                EPOCH FROM (COALESCE(de.resolved_at, NOW()) - de.opened_at)
+                            ) / 60.0
+                        ),
+                        0
+                    ) AS unplanned_downtime_minutes
+                FROM public.downtime_events AS de
+                JOIN public.production_runs AS pr ON pr.id = de.production_run_id
+                WHERE {fault_where}
+                GROUP BY pr.line_technician;
+                """,
+                fault_params,
+            )
+            fault_rows = {row["line_technician"]: row for row in cursor.fetchall()}
+
+    empty_hourly = {
+        "expected_pallets": 0,
+        "actual_pallets": 0,
+        "expected_tonnes": 0,
+        "actual_tonnes": 0,
+        "planned_downtime_minutes": 0,
+    }
+
+    results = []
+    for technician, run_row in run_rows.items():
+        hourly_row = hourly_rows.get(technician, empty_hourly)
+        fault_row = fault_rows.get(technician)
+
+        expected_pallets = float(hourly_row["expected_pallets"])
+        actual_pallets = float(hourly_row["actual_pallets"])
+        expected_tonnes = float(hourly_row["expected_tonnes"])
+        actual_tonnes = float(hourly_row["actual_tonnes"])
+        completed_runs = run_row["completed_runs"]
+        runs_with_data = run_row["runs_with_data"]
+
+        results.append({
+            "line_technician": technician,
+            "completed_runs": completed_runs,
+            "expected_pallets": expected_pallets,
+            "actual_pallets": actual_pallets,
+            "expected_tonnes": expected_tonnes,
+            "actual_tonnes": actual_tonnes,
+            "output_gap_pallets": max(expected_pallets - actual_pallets, 0),
+            "output_gap_tonnes": max(expected_tonnes - actual_tonnes, 0),
+            "target_achievement_percent": (
+                (actual_pallets / expected_pallets * 100)
+                if expected_pallets > 0
+                else None
+            ),
+            "planned_downtime_minutes": float(hourly_row["planned_downtime_minutes"]),
+            "unplanned_downtime_minutes": (
+                float(fault_row["unplanned_downtime_minutes"]) if fault_row else 0.0
+            ),
+            "data_completion_rate_percent": (
+                (runs_with_data / completed_runs * 100) if completed_runs > 0 else None
+            ),
+            "lines": sorted(x for x in (run_row["lines"] or []) if x is not None),
+            "shifts": sorted(x for x in (run_row["shifts"] or []) if x is not None),
+            "products": sorted(x for x in (run_row["products"] or []) if x is not None),
+            "customers": sorted(x for x in (run_row["customers"] or []) if x is not None),
+            "run_ids": run_row["run_ids"] or [],
+        })
+
+    return results
