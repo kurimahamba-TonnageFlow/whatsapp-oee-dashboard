@@ -1,0 +1,166 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--pulse-color-bg);
+  color: var(--pulse-color-text);
+  font-family: var(--pulse-font-family);
+  font-size: var(--pulse-font-size-base);
+  line-height: var(--pulse-line-height);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  min-height: var(--pulse-touch-target-min);
+  min-width: var(--pulse-touch-target-min);
+  padding: 0 var(--pulse-space-4);
+  border-radius: var(--pulse-radius-md);
+  border: 1px solid var(--pulse-color-border);
+  background: var(--pulse-color-surface);
+  cursor: pointer;
+}
+
+/* Visible keyboard focus everywhere - never hover-only */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--pulse-color-focus);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.25;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-shell__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pulse-space-3);
+  padding: var(--pulse-space-4) var(--pulse-space-5);
+  background: var(--pulse-color-surface);
+  border-bottom: 1px solid var(--pulse-color-border);
+}
+
+.app-shell__title {
+  font-size: var(--pulse-font-size-lg);
+  font-weight: 700;
+  margin: 0;
+}
+
+.app-shell__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pulse-space-2);
+  padding: var(--pulse-space-3) var(--pulse-space-5);
+  background: var(--pulse-color-surface);
+  border-bottom: 1px solid var(--pulse-color-border);
+}
+
+.app-shell__nav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--pulse-touch-target-min);
+  padding: 0 var(--pulse-space-4);
+  border-radius: var(--pulse-radius-md);
+  color: var(--pulse-color-text);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: var(--pulse-font-size-sm);
+}
+
+.app-shell__nav-link--active {
+  background: var(--pulse-color-primary);
+  color: var(--pulse-color-primary-contrast);
+}
+
+.app-shell__main {
+  flex: 1;
+  padding: var(--pulse-space-5);
+}
+
+.placeholder-panel {
+  background: var(--pulse-color-surface);
+  border: 1px solid var(--pulse-color-border);
+  border-radius: var(--pulse-radius-lg);
+  padding: var(--pulse-space-6);
+  max-width: 640px;
+}
+
+.placeholder-panel p {
+  color: var(--pulse-color-text-muted);
+}
+
+.api-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pulse-space-2);
+  font-size: var(--pulse-font-size-sm);
+  color: var(--pulse-color-text-muted);
+}
+
+.api-status__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.api-status--connected {
+  color: var(--pulse-color-success);
+}
+
+.api-status--unavailable {
+  color: var(--pulse-color-danger);
+}
+
+/* Tablet and up: a little more breathing room */
+@media (min-width: 768px) {
+  .app-shell__main {
+    padding: var(--pulse-space-7);
+  }
+}
+
+/* Narrow phones: tighten side padding so content isn't cramped */
+@media (max-width: 480px) {
+  .app-shell__header,
+  .app-shell__nav,
+  .app-shell__main {
+    padding-left: var(--pulse-space-3);
+    padding-right: var(--pulse-space-3);
+  }
+}
