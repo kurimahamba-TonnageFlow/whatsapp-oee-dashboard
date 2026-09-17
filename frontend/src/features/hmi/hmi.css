@@ -1,0 +1,355 @@
+/*
+  Operator HMI theme. No visual reference for "the established
+  Tonnage Flow dark style" was ever supplied in this project (frontend
+  source has never existed in this repo) - this is a considered,
+  high-contrast dark theme built for factory-tablet use, not a
+  verified match to a real design. Scoped under .hmi-screen so the
+  rest of the app (Engineering/Management/Dashboard placeholders)
+  keeps the light Stage-3 foundation theme.
+*/
+
+.hmi-screen {
+  --hmi-bg: #12141a;
+  --hmi-surface: #1c1f28;
+  --hmi-surface-raised: #262a35;
+  --hmi-border: #3a3f4d;
+  --hmi-text: #f4f5f7;
+  --hmi-text-muted: #a6acbb;
+  --hmi-accent: #4c8dff;
+  --hmi-success: #33c17a;
+  --hmi-warning: #f0ad3d;
+  --hmi-danger: #f0554f;
+  --hmi-focus: #ffd23f;
+
+  background: var(--hmi-bg);
+  color: var(--hmi-text);
+  min-height: 100%;
+  padding: var(--pulse-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-5);
+  font-size: 1.05rem;
+}
+
+.hmi-screen h1 {
+  font-size: var(--pulse-font-size-xl);
+  margin: 0;
+}
+
+/* ---------------- Buttons ---------------- */
+
+.hmi-screen button {
+  min-height: 56px;
+  min-width: 44px;
+  padding: 0 var(--pulse-space-5);
+  border-radius: var(--pulse-radius-md);
+  font-size: 1.05rem;
+  font-weight: 600;
+  border: 1px solid var(--hmi-border);
+  background: var(--hmi-surface-raised);
+  color: var(--hmi-text);
+}
+
+.hmi-primary-button {
+  background: var(--hmi-accent);
+  border-color: var(--hmi-accent);
+  color: #08111f;
+}
+
+.hmi-secondary-button {
+  background: var(--hmi-surface-raised);
+}
+
+.hmi-danger-button {
+  background: var(--hmi-danger);
+  border-color: var(--hmi-danger);
+  color: #1a0403;
+}
+
+.hmi-ghost-button {
+  background: transparent;
+}
+
+.hmi-screen button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hmi-screen a:focus-visible,
+.hmi-screen button:focus-visible,
+.hmi-screen input:focus-visible,
+.hmi-screen select:focus-visible,
+.hmi-screen textarea:focus-visible {
+  outline: 3px solid var(--hmi-focus);
+  outline-offset: 2px;
+}
+
+/* ---------------- Home ---------------- */
+
+.hmi-home__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-1);
+}
+
+.hmi-home__brand {
+  font-size: var(--pulse-font-size-lg);
+  font-weight: 700;
+  margin: 0;
+}
+
+.hmi-home__clock,
+.hmi-home__shift {
+  margin: 0;
+  color: var(--hmi-text-muted);
+}
+
+.hmi-home__status-message {
+  color: var(--hmi-text-muted);
+}
+
+.hmi-home__status-message--error {
+  color: var(--hmi-danger);
+}
+
+.hmi-home__line-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--pulse-space-4);
+}
+
+.hmi-line-card {
+  background: var(--hmi-surface);
+  border: 1px solid var(--hmi-border);
+  border-radius: var(--pulse-radius-lg);
+  padding: var(--pulse-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-3);
+}
+
+.hmi-home__footer {
+  margin-top: auto;
+  display: flex;
+  gap: var(--pulse-space-3);
+}
+
+/* ---------------- Forms ---------------- */
+
+.hmi-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--pulse-space-4);
+}
+
+.hmi-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-1);
+  font-weight: 600;
+}
+
+.hmi-field input,
+.hmi-field select,
+.hmi-field textarea {
+  min-height: 48px;
+  padding: 0 var(--pulse-space-3);
+  border-radius: var(--pulse-radius-sm);
+  border: 1px solid var(--hmi-border);
+  background: var(--hmi-surface);
+  color: var(--hmi-text);
+  font-weight: 400;
+  font-size: 1rem;
+}
+
+.hmi-field textarea {
+  padding: var(--pulse-space-3);
+}
+
+.hmi-field-error {
+  color: var(--hmi-danger);
+  font-weight: 600;
+  font-size: var(--pulse-font-size-sm);
+}
+
+.hmi-form-actions {
+  display: flex;
+  gap: var(--pulse-space-3);
+  flex-wrap: wrap;
+}
+
+.hmi-inline-error {
+  color: var(--hmi-danger);
+  font-weight: 600;
+}
+
+.hmi-inline-warning {
+  color: var(--hmi-warning);
+  font-weight: 600;
+}
+
+/* ---------------- Review / summary lists ---------------- */
+
+.hmi-review-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--pulse-space-3) var(--pulse-space-5);
+  margin: 0;
+}
+
+.hmi-review-list__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid var(--hmi-border);
+  padding-bottom: var(--pulse-space-2);
+}
+
+.hmi-review-list__row dt {
+  color: var(--hmi-text-muted);
+  font-size: var(--pulse-font-size-sm);
+}
+
+.hmi-review-list__row dd {
+  margin: 0;
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+/* ---------------- Status pill ---------------- */
+
+.hmi-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--pulse-space-1) var(--pulse-space-3);
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: var(--pulse-font-size-sm);
+  width: fit-content;
+}
+
+.hmi-status-pill--green {
+  background: rgba(51, 193, 122, 0.18);
+  color: var(--hmi-success);
+}
+
+.hmi-status-pill--amber {
+  background: rgba(240, 173, 61, 0.18);
+  color: var(--hmi-warning);
+}
+
+.hmi-status-pill--red {
+  background: rgba(240, 85, 79, 0.18);
+  color: var(--hmi-danger);
+}
+
+.hmi-status-pill--blue {
+  background: rgba(76, 141, 255, 0.18);
+  color: var(--hmi-accent);
+}
+
+/* ---------------- Progress bar ---------------- */
+
+.hmi-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--pulse-space-3);
+}
+
+.hmi-progress__track {
+  flex: 1;
+  height: 20px;
+  background: var(--hmi-surface-raised);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.hmi-progress__fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.hmi-progress__fill--green {
+  background: var(--hmi-success);
+}
+
+.hmi-progress__fill--amber {
+  background: var(--hmi-warning);
+}
+
+.hmi-progress__fill--red {
+  background: var(--hmi-danger);
+}
+
+.hmi-progress__value {
+  font-weight: 700;
+  min-width: 3.5ch;
+  text-align: right;
+}
+
+/* ---------------- Active run ---------------- */
+
+.hmi-active-run__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--pulse-space-3);
+}
+
+.hmi-active-run__header p {
+  color: var(--hmi-text-muted);
+  margin: var(--pulse-space-1) 0 0;
+}
+
+.hmi-active-run__actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--pulse-space-3);
+  margin-top: auto;
+}
+
+/* ---------------- Run started / completed marks ---------------- */
+
+.hmi-run-started__mark {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--hmi-success);
+  margin: 0;
+}
+
+/* ---------------- Button grid (planned downtime reasons) ---------------- */
+
+.hmi-button-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--pulse-space-3);
+}
+
+.hmi-planned-downtime__elapsed {
+  color: var(--hmi-text-muted);
+  font-size: 1.2rem;
+}
+
+/* ---------------- Responsive ---------------- */
+
+@media (max-width: 480px) {
+  .hmi-screen {
+    padding: var(--pulse-space-3);
+    font-size: 1rem;
+  }
+
+  .hmi-form-grid,
+  .hmi-review-list,
+  .hmi-home__line-grid,
+  .hmi-active-run__actions,
+  .hmi-button-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 1024px) and (orientation: landscape) {
+  .hmi-active-run__actions {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}

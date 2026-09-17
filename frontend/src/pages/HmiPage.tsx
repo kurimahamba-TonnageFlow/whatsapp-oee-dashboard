@@ -1,10 +1,10 @@
 import { AppShell } from '../layouts/AppShell'
-import { HmiPlaceholder } from '../features/hmi/HmiPlaceholder'
+import { HmiScreen } from '../features/hmi/HmiScreen'
 
 export function HmiPage() {
   return (
     <AppShell>
-      <HmiPlaceholder />
+      <HmiScreen />
     </AppShell>
   )
 }

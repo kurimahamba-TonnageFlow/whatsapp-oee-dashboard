@@ -23,11 +23,26 @@ describe('AppRoutes', () => {
   it('redirects / to /hmi', () => {
     renderAt('/')
 
-    expect(screen.getByRole('heading', { name: /^hmi$/i })).toBeInTheDocument()
+    // /hmi is the real operator HMI (Stage 4) - its home screen shows
+    // this heading while the config fetch (mocked as never-resolving
+    // above) is pending.
+    expect(
+      screen.getByRole('heading', { name: /select a production line/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('renders the real HMI home screen at /hmi', () => {
+    renderAt('/hmi')
+
+    // Appears once in AppShell's shared header and once in the HMI's
+    // own home-screen brand line.
+    expect(screen.getAllByText('TonnageFlow Pulse')).toHaveLength(2)
+    expect(
+      screen.getByRole('heading', { name: /select a production line/i }),
+    ).toBeInTheDocument()
   })
 
   it.each([
-    ['/hmi', /^hmi$/i],
     ['/engineering', /^engineering$/i],
     ['/management', /^management$/i],
     ['/management/performance', /technician performance/i],
