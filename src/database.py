@@ -1803,3 +1803,278 @@ def get_technician_performance(filters=None):
         })
 
     return results
+
+
+# ==========================================================
+# ENGINEERING WORKFLOW (Stage 5A)
+# ==========================================================
+#
+# New, additive functions only - no existing function above this
+# section is modified. get_engineering_faults() is a dedicated sibling
+# to get_dashboard_faults() (same _fault_conditions filter builder,
+# reused rather than duplicated) rather than a change to that
+# function, so the existing, tested /api/v1/dashboard/faults endpoint
+# and its Pydantic response model are never touched.
+#
+# All accept/close writes use a guarded UPDATE ... WHERE <still in the
+# expected state> RETURNING pattern, the same atomic-compare-and-set
+# idiom already proven by force_close_production_run() above: the
+# database's own row lock during the UPDATE is what makes two
+# concurrent requests safe, not application-level locking.
+
+
+def get_downtime_event_by_id(downtime_event_id):
+    """Plain, unfiltered lookup by id (mirrors get_production_run_by_id
+    above) - used by the Engineering API for 404 checks and for
+    working out *why* a guarded UPDATE matched zero rows."""
+    query = """
+        SELECT
+            id,
+            production_run_id,
+            fault_id,
+            machine,
+            reason,
+            reported_by,
+            engineer,
+            production_status,
+            engineering_status,
+            opened_at,
+            accepted_at,
+            resolved_at
+        FROM public.downtime_events
+        WHERE id = %(downtime_event_id)s
+        LIMIT 1;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, {"downtime_event_id": downtime_event_id})
+            return cursor.fetchone()
+
+
+def get_engineering_repair_updates(downtime_event_ids):
+    """Repair-update history for a specific set of downtime_events rows,
+    including the Stage 5A repair_classification / Machine Setting /
+    created_at columns. Kept separate from
+    get_dashboard_engineering_updates() above so that function's
+    existing, tested query and consumer (/api/v1/dashboard/
+    engineering-downtime) are never touched by this new column set."""
+    if not downtime_event_ids:
+        return []
+
+    query = """
+        SELECT
+            eu.id,
+            eu.downtime_event_id,
+            eu.engineer,
+            eu.update_type,
+            eu.repair_classification,
+            eu.finding,
+            eu.action,
+            eu.notes,
+            eu.setting_name,
+            eu.previous_value,
+            eu.new_value,
+            eu.reason_for_change,
+            eu.affected_products_or_formats,
+            eu.engineering_status,
+            eu.created_at
+        FROM public.engineering_updates AS eu
+        WHERE eu.downtime_event_id = ANY(%(downtime_event_ids)s)
+        ORDER BY eu.downtime_event_id, eu.id;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, {"downtime_event_ids": list(downtime_event_ids)})
+            return cursor.fetchall()
+
+
+def get_engineering_faults(filters=None):
+    """Open + resolved faults for the Engineering API, with nested
+    repair_updates. Reuses _fault_conditions() (the same filter builder
+    get_dashboard_faults() uses) rather than duplicating its
+    business rules; adds accepted_at (new Stage 5A column) and omits
+    fields the Engineering brief did not ask for (engineer_called,
+    retrospective) to avoid exposing unrelated internal data."""
+    conditions, params = _fault_conditions(filters)
+    where_sql = " AND ".join(conditions)
+
+    query = f"""
+        SELECT
+            de.id AS downtime_event_id,
+            de.production_run_id,
+            pr.production_line,
+            de.fault_id,
+            de.machine,
+            de.reason,
+            de.reported_by,
+            de.engineer,
+            de.production_status,
+            de.engineering_status,
+            de.opened_at,
+            de.accepted_at,
+            de.resolved_at,
+            EXTRACT(
+                EPOCH FROM (COALESCE(de.resolved_at, NOW()) - de.opened_at)
+            ) / 60.0 AS duration_minutes,
+            (de.resolved_at IS NULL) AS duration_is_active
+        FROM public.downtime_events AS de
+        JOIN public.production_runs AS pr ON pr.id = de.production_run_id
+        WHERE {where_sql}
+        ORDER BY de.opened_at DESC;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+    updates_by_fault = {}
+    for update in get_engineering_repair_updates([row["downtime_event_id"] for row in rows]):
+        updates_by_fault.setdefault(update["downtime_event_id"], []).append(update)
+
+    for row in rows:
+        row["repair_updates"] = updates_by_fault.get(row["downtime_event_id"], [])
+
+    return rows
+
+
+def accept_engineering_fault(downtime_event_id, engineer, accepted_at):
+    """Atomic compare-and-set: only assigns when the fault is still
+    Ongoing AND (unassigned OR already assigned to this same engineer).
+    Returns None if a second engineer already holds it, or if it is no
+    longer Ongoing - the caller does one get_downtime_event_by_id
+    lookup to tell those cases apart, same idiom as
+    management_api.force_close_run(). COALESCE keeps the original
+    accepted_at on a repeat call from the same engineer (idempotent)."""
+    query = """
+        UPDATE public.downtime_events
+        SET
+            engineer = %(engineer)s,
+            engineering_status = 'Investigating',
+            accepted_at = COALESCE(accepted_at, %(accepted_at)s)
+        WHERE id = %(downtime_event_id)s
+          AND production_status = 'Ongoing'
+          AND (engineer IS NULL OR engineer = %(engineer)s)
+        RETURNING
+            id, production_run_id, fault_id, machine, reason, reported_by,
+            engineer, production_status, engineering_status, opened_at,
+            accepted_at, resolved_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                query,
+                {
+                    "downtime_event_id": downtime_event_id,
+                    "engineer": engineer,
+                    "accepted_at": accepted_at,
+                },
+            )
+            accepted = cursor.fetchone()
+
+        connection.commit()
+
+    return accepted
+
+
+def add_engineering_repair_update(downtime_event_id, repair_update):
+    """Plain insert for an interim repair-progress update (between
+    Accept and Close). Does not change downtime_events' own state -
+    engineering_status stays 'Investigating', production_status is
+    untouched, mirroring the CLI's existing "Follow Up" semantics for
+    a non-final engineering communication."""
+    query = """
+        INSERT INTO public.engineering_updates (
+            downtime_event_id, production_run_id, fault_id, engineer,
+            update_type, repair_classification, finding, action, notes,
+            setting_name, previous_value, new_value, reason_for_change,
+            affected_products_or_formats, engineering_status
+        )
+        VALUES (
+            %(downtime_event_id)s, %(production_run_id)s, %(fault_id)s, %(engineer)s,
+            'Follow Up', %(repair_classification)s, %(finding)s, %(action)s, %(notes)s,
+            %(setting_name)s, %(previous_value)s, %(new_value)s, %(reason_for_change)s,
+            %(affected_products_or_formats)s, 'Investigating'
+        )
+        RETURNING id, created_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query, {**repair_update, "downtime_event_id": downtime_event_id})
+            created = cursor.fetchone()
+
+        connection.commit()
+
+    if created is None:
+        raise RuntimeError(
+            "Engineering repair update was inserted but no database ID was returned."
+        )
+
+    return created
+
+
+def close_engineering_fault(downtime_event_id, repair_update, resolved_at):
+    """Atomically inserts the final ('Resolution') engineering_updates
+    row and marks the downtime_event Resolved, in a single database
+    transaction on one connection (psycopg3's implicit
+    BEGIN/commit-or-rollback-on-exit). The guarded UPDATE (WHERE
+    production_status = 'Ongoing') is the same compare-and-set pattern
+    as accept_engineering_fault() / force_close_production_run(). If
+    it matches zero rows - the fault was already resolved by a racing
+    request - this function explicitly rolls back the whole
+    transaction, including the INSERT that just ran, so the losing
+    request never leaves an orphan final repair record and the fault
+    never ends up "closed but with no saved repair information."
+    Returns None in that case; otherwise returns the updated row."""
+    insert_query = """
+        INSERT INTO public.engineering_updates (
+            downtime_event_id, production_run_id, fault_id, engineer,
+            update_type, repair_classification, finding, action, notes,
+            setting_name, previous_value, new_value, reason_for_change,
+            affected_products_or_formats, engineering_status
+        )
+        VALUES (
+            %(downtime_event_id)s, %(production_run_id)s, %(fault_id)s, %(engineer)s,
+            'Resolution', %(repair_classification)s, %(finding)s, %(action)s, %(notes)s,
+            %(setting_name)s, %(previous_value)s, %(new_value)s, %(reason_for_change)s,
+            %(affected_products_or_formats)s, 'Resolved'
+        )
+        RETURNING id;
+    """
+
+    update_query = """
+        UPDATE public.downtime_events
+        SET
+            production_status = 'Resolved',
+            engineering_status = 'Resolved',
+            resolved_at = %(resolved_at)s
+        WHERE id = %(downtime_event_id)s
+          AND production_status = 'Ongoing'
+        RETURNING
+            id, production_run_id, fault_id, machine, reason, reported_by,
+            engineer, production_status, engineering_status, opened_at,
+            accepted_at, resolved_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(insert_query, {**repair_update, "downtime_event_id": downtime_event_id})
+            cursor.fetchone()
+
+            cursor.execute(
+                update_query,
+                {"downtime_event_id": downtime_event_id, "resolved_at": resolved_at},
+            )
+            closed = cursor.fetchone()
+
+        if closed is None:
+            connection.rollback()
+            return None
+
+        connection.commit()
+
+    return closed

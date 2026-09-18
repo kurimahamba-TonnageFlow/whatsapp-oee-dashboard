@@ -6,6 +6,11 @@
 from datetime import datetime
 
 try:
+    from .domain_constants import ENGINEERS
+except ImportError:
+    from domain_constants import ENGINEERS
+
+try:
     from .database import (
         save_production_run,
         save_hourly_update,
@@ -71,14 +76,13 @@ line_technicians_by_line = {
 }
 
 
-engineers = [
-    "Aaron",
-    "Yago",
-    "Steve",
-    "Dan",
-    "Kuri",
-    "Alfie"
-]
+# Single source of truth is src/domain_constants.py's ENGINEERS tuple -
+# also read by src/engineering_api.py, so the approved-engineer list
+# is never duplicated between the CLI and the HTTP API. `engineers`
+# stays the name every choose_option() call below already uses; a
+# tuple behaves identically to the previous list for indexing/
+# iteration, and this list is never mutated anywhere in this file.
+engineers = ENGINEERS
 
 
 # ==========================================================

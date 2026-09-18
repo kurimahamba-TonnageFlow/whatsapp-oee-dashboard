@@ -21,12 +21,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 try:
     from .dashboard_api import router as dashboard_router
+    from .engineering_api import router as engineering_router
     from .hmi_config_api import router as hmi_config_router
     from .management_api import router as management_router
     from .runs_api import router as runs_router
     from .whatsapp_webhook import app as whatsapp_app
 except ImportError:
     from dashboard_api import router as dashboard_router
+    from engineering_api import router as engineering_router
     from hmi_config_api import router as hmi_config_router
     from management_api import router as management_router
     from runs_api import router as runs_router
@@ -71,6 +73,7 @@ app.add_middleware(
 app.include_router(dashboard_router)
 app.include_router(runs_router)
 app.include_router(management_router)
+app.include_router(engineering_router)
 app.include_router(hmi_config_router)
 
 # Mounted last, at root, so the explicit routes above always take
