@@ -537,10 +537,10 @@ def update_downtime_event_state(
 #     "Machine Setup" vs "Machine Repair" cannot be computed here.
 
 _TEST_DATA_EXCLUSION_SQL = """
-    pr.production_line NOT ILIKE 'TEST-%'
-    AND pr.customer NOT ILIKE '%TEST-%'
-    AND pr.product NOT ILIKE '%TEST-%'
-    AND pr.shift NOT ILIKE '%TEST-%'
+    pr.production_line NOT ILIKE 'TEST-%%'
+    AND pr.customer NOT ILIKE '%%TEST-%%'
+    AND pr.product NOT ILIKE '%%TEST-%%'
+    AND pr.shift NOT ILIKE '%%TEST-%%'
 """
 
 
@@ -1947,12 +1947,17 @@ def accept_engineering_fault(downtime_event_id, engineer, accepted_at):
     longer Ongoing - the caller does one get_downtime_event_by_id
     lookup to tell those cases apart, same idiom as
     management_api.force_close_run(). COALESCE keeps the original
-    accepted_at on a repeat call from the same engineer (idempotent)."""
+    accepted_at on a repeat call from the same engineer (idempotent).
+
+    engineering_status is set to 'Ongoing', not 'Investigating': a
+    read-only live-schema check confirmed chk_engineering_status
+    permits exactly 'Not Started' / 'Ongoing' / 'Resolved' -
+    'Investigating' is not a legal value for this column."""
     query = """
         UPDATE public.downtime_events
         SET
             engineer = %(engineer)s,
-            engineering_status = 'Investigating',
+            engineering_status = 'Ongoing',
             accepted_at = COALESCE(accepted_at, %(accepted_at)s)
         WHERE id = %(downtime_event_id)s
           AND production_status = 'Ongoing'
@@ -1983,9 +1988,14 @@ def accept_engineering_fault(downtime_event_id, engineer, accepted_at):
 def add_engineering_repair_update(downtime_event_id, repair_update):
     """Plain insert for an interim repair-progress update (between
     Accept and Close). Does not change downtime_events' own state -
-    engineering_status stays 'Investigating', production_status is
+    engineering_status stays 'Ongoing', production_status is
     untouched, mirroring the CLI's existing "Follow Up" semantics for
-    a non-final engineering communication."""
+    a non-final engineering communication.
+
+    engineering_status is set to 'Ongoing', not 'Investigating': a
+    read-only live-schema check confirmed chk_engineering_update_status
+    permits exactly 'Ongoing' / 'Resolved' - 'Investigating' is not a
+    legal value for this column."""
     query = """
         INSERT INTO public.engineering_updates (
             downtime_event_id, production_run_id, fault_id, engineer,
@@ -1997,7 +2007,7 @@ def add_engineering_repair_update(downtime_event_id, repair_update):
             %(downtime_event_id)s, %(production_run_id)s, %(fault_id)s, %(engineer)s,
             'Follow Up', %(repair_classification)s, %(finding)s, %(action)s, %(notes)s,
             %(setting_name)s, %(previous_value)s, %(new_value)s, %(reason_for_change)s,
-            %(affected_products_or_formats)s, 'Investigating'
+            %(affected_products_or_formats)s, 'Ongoing'
         )
         RETURNING id, created_at;
     """
@@ -2078,3 +2088,90 @@ def close_engineering_fault(downtime_event_id, repair_update, resolved_at):
         connection.commit()
 
     return closed
+
+
+def hand_over_engineering_fault(downtime_event_id, handover):
+    """Releases an owned, in-progress downtime_event back to unassigned,
+    then records the handover note as a 'Follow Up' engineering_updates
+    row - in a single database transaction on one connection (psycopg3's
+    implicit BEGIN/commit-or-rollback-on-exit).
+
+    Order is deliberately the reverse of close_engineering_fault(): the
+    guarded UPDATE runs FIRST here. Its WHERE clause requires the fault
+    to still be Ongoing, its engineering_status to still be 'Ongoing',
+    engineer to be this exact authenticated engineer, and accepted_at to
+    be non-NULL (i.e. genuinely accepted, not merely assigned) - the
+    same atomic compare-and-set idiom used by accept_engineering_fault()
+    / close_engineering_fault(): the database's own row lock during the
+    UPDATE is what makes concurrent requests (a second handover, a
+    close, another accept racing this one) safe, not application-level
+    locking.
+
+    If the UPDATE matches zero rows, this function returns None
+    immediately, WITHOUT ever attempting the history INSERT - there is
+    nothing to roll back because nothing has been written yet. Only
+    once the UPDATE succeeds does the handover-note INSERT run, on the
+    same connection/cursor. If that INSERT raises for any reason, it is
+    caught here and the transaction is explicitly rolled back (undoing
+    the UPDATE too) before the exception is re-raised - so no code path
+    can ever commit the fault's release without its history record, or
+    vice versa: both statements land together, or neither does.
+
+    engineering_status literals here ('Not Started' for the released
+    fault, 'Ongoing' for the history row) are deliberately NOT
+    'Investigating': a read-only live-schema check confirmed
+    chk_engineering_status permits exactly 'Not Started' / 'Ongoing' /
+    'Resolved', and chk_engineering_update_status permits exactly
+    'Ongoing' / 'Resolved' - 'Investigating' is not a legal value for
+    either column."""
+    update_query = """
+        UPDATE public.downtime_events
+        SET
+            engineer = NULL,
+            accepted_at = NULL,
+            engineering_status = 'Not Started'
+        WHERE id = %(downtime_event_id)s
+          AND production_status = 'Ongoing'
+          AND engineering_status = 'Ongoing'
+          AND engineer = %(engineer)s
+          AND accepted_at IS NOT NULL
+        RETURNING
+            id, production_run_id, fault_id, machine, reason, reported_by,
+            engineer, production_status, engineering_status, opened_at,
+            accepted_at, resolved_at;
+    """
+
+    insert_query = """
+        INSERT INTO public.engineering_updates (
+            downtime_event_id, production_run_id, fault_id, engineer,
+            update_type, finding, action, engineering_status
+        )
+        VALUES (
+            %(downtime_event_id)s, %(production_run_id)s, %(fault_id)s, %(engineer)s,
+            'Follow Up', %(finding)s, %(action)s, 'Ongoing'
+        )
+        RETURNING id, created_at;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                update_query,
+                {"downtime_event_id": downtime_event_id, "engineer": handover["engineer"]},
+            )
+            released = cursor.fetchone()
+
+            if released is None:
+                connection.rollback()
+                return None
+
+            try:
+                cursor.execute(insert_query, {**handover, "downtime_event_id": downtime_event_id})
+                cursor.fetchone()
+            except Exception:
+                connection.rollback()
+                raise
+
+        connection.commit()
+
+    return released

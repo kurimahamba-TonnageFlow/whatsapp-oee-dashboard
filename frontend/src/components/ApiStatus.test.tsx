@@ -8,7 +8,11 @@ vi.mock('../api/client', () => ({
 }))
 
 afterEach(() => {
-  vi.resetAllMocks()
+  // Scoped to this file's own mock only - vi.resetAllMocks() is a
+  // process-wide reset (Vitest's mock registry is shared across every
+  // test file in a worker) and can intermittently wipe another file's
+  // still-in-flight mock configuration during a full-suite run.
+  vi.mocked(apiClient.get).mockReset()
 })
 
 describe('ApiStatus', () => {

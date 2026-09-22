@@ -43,7 +43,6 @@ describe('AppRoutes', () => {
   })
 
   it.each([
-    ['/engineering', /^engineering$/i],
     ['/management', /^management$/i],
     ['/management/performance', /technician performance/i],
     ['/dashboard', /^dashboard$/i],
@@ -51,5 +50,11 @@ describe('AppRoutes', () => {
     renderAt(path)
 
     expect(screen.getByRole('heading', { name: expectedHeading })).toBeInTheDocument()
+  })
+
+  it('renders the real Engineering sign-in screen at /engineering (Stage 5B)', () => {
+    renderAt('/engineering')
+
+    expect(screen.getByRole('heading', { name: /engineering sign in/i })).toBeInTheDocument()
   })
 })

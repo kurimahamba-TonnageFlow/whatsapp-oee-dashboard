@@ -512,11 +512,17 @@ def test_test_data_exclusion_clause_is_always_first_condition():
 
 
 def test_test_data_exclusion_clause_covers_all_four_required_fields():
+    # '%%' (not '%'): this fixed-literal SQL fragment is spliced,
+    # unparameterised, into every faults/dashboard WHERE clause, and
+    # psycopg3 parses the whole query text for %-style placeholders
+    # whenever params are passed to cursor.execute() - a bare '%' here
+    # broke every such query live (psycopg.errors.ProgrammingError).
+    # '%%' is the escaped form of a literal '%', same ILIKE semantics.
     clause = database._TEST_DATA_EXCLUSION_SQL
-    assert "production_line NOT ILIKE 'TEST-%'" in clause
-    assert "customer NOT ILIKE '%TEST-%'" in clause
-    assert "product NOT ILIKE '%TEST-%'" in clause
-    assert "shift NOT ILIKE '%TEST-%'" in clause
+    assert "production_line NOT ILIKE 'TEST-%%'" in clause
+    assert "customer NOT ILIKE '%%TEST-%%'" in clause
+    assert "product NOT ILIKE '%%TEST-%%'" in clause
+    assert "shift NOT ILIKE '%%TEST-%%'" in clause
 
 
 # ==========================================================

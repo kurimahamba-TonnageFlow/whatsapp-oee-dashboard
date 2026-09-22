@@ -1,0 +1,462 @@
+/*
+  Engineering workspace theme. Deliberately reuses the HMI's dark,
+  high-contrast palette (see frontend/src/features/hmi/hmi.css) so the
+  Engineering area feels like the same working tool as the operator
+  HMI, not a separate light "admin" app. Scoped under .engineering-screen
+  so the rest of the app (Management/Dashboard placeholders) keeps the
+  light Stage-3 foundation theme.
+*/
+
+.engineering-screen {
+  --eng-bg: #12141a;
+  --eng-surface: #1c1f28;
+  --eng-surface-raised: #262a35;
+  --eng-border: #3a3f4d;
+  --eng-text: #f4f5f7;
+  --eng-text-muted: #a6acbb;
+  --eng-accent: #4c8dff;
+  --eng-success: #33c17a;
+  --eng-warning: #f0ad3d;
+  --eng-danger: #f0554f;
+  --eng-focus: #ffd23f;
+
+  background: var(--eng-bg);
+  color: var(--eng-text);
+  min-height: 100%;
+  padding: var(--pulse-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-5);
+  font-size: 1.05rem;
+}
+
+.engineering-screen h1,
+.engineering-screen h2,
+.engineering-screen h3 {
+  margin: 0;
+}
+
+.engineering-screen button {
+  min-height: 56px;
+  min-width: 44px;
+  padding: 0 var(--pulse-space-5);
+  border-radius: var(--pulse-radius-md);
+  font-size: 1.05rem;
+  font-weight: 600;
+  border: 1px solid var(--eng-border);
+  background: var(--eng-surface-raised);
+  color: var(--eng-text);
+  cursor: pointer;
+}
+
+.engineering-primary-button {
+  background: var(--eng-accent);
+  border-color: var(--eng-accent);
+  color: #08111f;
+}
+
+.engineering-secondary-button {
+  background: var(--eng-surface-raised);
+}
+
+.engineering-danger-button {
+  background: var(--eng-danger);
+  border-color: var(--eng-danger);
+  color: #1a0403;
+}
+
+.engineering-screen button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.engineering-screen a:focus-visible,
+.engineering-screen button:focus-visible,
+.engineering-screen input:focus-visible,
+.engineering-screen select:focus-visible,
+.engineering-screen textarea:focus-visible,
+.engineering-screen [tabindex]:focus-visible {
+  outline: 3px solid var(--eng-focus);
+  outline-offset: 2px;
+}
+
+/* ---------------- Login ---------------- */
+
+.engineering-login {
+  align-items: center;
+  justify-content: center;
+}
+
+.engineering-login__panel {
+  background: var(--eng-surface);
+  border: 1px solid var(--eng-border);
+  border-radius: var(--pulse-radius-lg);
+  padding: var(--pulse-space-6);
+  max-width: 420px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-4);
+}
+
+.engineering-login__brand {
+  color: var(--eng-text-muted);
+  margin: 0;
+  font-size: var(--pulse-font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.engineering-login__panel form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-4);
+}
+
+.engineering-login__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.engineering-back-link {
+  color: var(--eng-text-muted);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+/* ---------------- Fields ---------------- */
+
+.engineering-field,
+.engineering-repair-form fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-2);
+  font-weight: 600;
+}
+
+.engineering-field input,
+.engineering-field select,
+.engineering-field textarea {
+  min-height: 48px;
+  padding: var(--pulse-space-2) var(--pulse-space-3);
+  border-radius: var(--pulse-radius-md);
+  border: 1px solid var(--eng-border);
+  background: var(--eng-surface-raised);
+  color: var(--eng-text);
+  font: inherit;
+  font-weight: 400;
+}
+
+.engineering-field textarea {
+  min-height: auto;
+  resize: vertical;
+}
+
+.engineering-repair-form fieldset {
+  border: 1px solid var(--eng-border);
+  border-radius: var(--pulse-radius-md);
+  padding: var(--pulse-space-3);
+}
+
+.engineering-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pulse-space-4);
+}
+
+.engineering-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pulse-space-2);
+  font-weight: 400;
+  min-height: 44px;
+}
+
+.engineering-field-error,
+.engineering-inline-error {
+  color: var(--eng-danger);
+  font-weight: 600;
+}
+
+.engineering-inline-error {
+  background: rgba(240, 85, 79, 0.12);
+  border: 1px solid var(--eng-danger);
+  border-radius: var(--pulse-radius-md);
+  padding: var(--pulse-space-3);
+  margin: 0;
+}
+
+.engineering-success-note {
+  color: var(--eng-success);
+  background: rgba(51, 193, 122, 0.12);
+  border: 1px solid var(--eng-success);
+  border-radius: var(--pulse-radius-md);
+  padding: var(--pulse-space-3);
+  margin: 0;
+  font-weight: 600;
+}
+
+.engineering-inline-note {
+  color: var(--eng-text-muted);
+  margin: 0;
+}
+
+.engineering-machine-setting-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-4);
+  border-left: 3px solid var(--eng-accent);
+  padding-left: var(--pulse-space-4);
+}
+
+.engineering-form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ---------------- Workspace ---------------- */
+
+.engineering-workspace__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--pulse-space-3);
+}
+
+.engineering-workspace__brand {
+  margin: 0;
+  color: var(--eng-text-muted);
+  font-size: var(--pulse-font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.engineering-workspace__engineer {
+  margin: 0;
+  font-size: var(--pulse-font-size-lg);
+  font-weight: 700;
+}
+
+.engineering-workspace__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--pulse-space-3);
+  flex-wrap: wrap;
+}
+
+.engineering-workspace__refreshed {
+  color: var(--eng-text-muted);
+  font-size: var(--pulse-font-size-sm);
+}
+
+.engineering-summary-counts {
+  display: flex;
+  gap: var(--pulse-space-5);
+  font-weight: 700;
+  color: var(--eng-text-muted);
+}
+
+.engineering-tabs {
+  display: flex;
+  gap: var(--pulse-space-2);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--eng-border);
+  padding-bottom: var(--pulse-space-2);
+}
+
+.engineering-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--eng-text-muted);
+}
+
+.engineering-tab--active {
+  background: var(--eng-surface-raised);
+  border-color: var(--eng-accent);
+  color: var(--eng-text);
+}
+
+.engineering-empty-state {
+  color: var(--eng-text-muted);
+  padding: var(--pulse-space-6);
+  text-align: center;
+  border: 1px dashed var(--eng-border);
+  border-radius: var(--pulse-radius-lg);
+}
+
+/* ---------------- Fault cards ---------------- */
+
+.engineering-fault-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--pulse-space-4);
+}
+
+.engineering-fault-card {
+  background: var(--eng-surface);
+  border: 1px solid var(--eng-border);
+  border-radius: var(--pulse-radius-lg);
+  padding: var(--pulse-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-3);
+  cursor: pointer;
+}
+
+.engineering-fault-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.engineering-fault-card__line {
+  font-weight: 700;
+  color: var(--eng-accent);
+}
+
+.engineering-fault-card__title {
+  font-size: var(--pulse-font-size-lg);
+}
+
+.engineering-fault-card__details {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--pulse-space-2) var(--pulse-space-4);
+  margin: 0;
+}
+
+.engineering-fault-card__details dt {
+  color: var(--eng-text-muted);
+  font-size: var(--pulse-font-size-sm);
+}
+
+.engineering-fault-card__details dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.engineering-status-pill {
+  border-radius: 999px;
+  padding: 2px var(--pulse-space-3);
+  font-size: var(--pulse-font-size-sm);
+  font-weight: 700;
+  background: var(--eng-surface-raised);
+}
+
+.engineering-status-pill--not-started {
+  color: var(--eng-warning);
+}
+
+.engineering-status-pill--investigating {
+  color: var(--eng-accent);
+}
+
+.engineering-status-pill--resolved {
+  color: var(--eng-success);
+}
+
+/* ---------------- Detail panel / dialogs ---------------- */
+
+.engineering-detail-overlay,
+.engineering-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--pulse-space-4);
+  z-index: 20;
+}
+
+.engineering-detail-panel {
+  background: var(--eng-surface);
+  border: 1px solid var(--eng-border);
+  border-radius: var(--pulse-radius-lg);
+  padding: var(--pulse-space-5);
+  max-width: 640px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-4);
+}
+
+.engineering-detail-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--pulse-space-3);
+}
+
+.engineering-detail-panel__summary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--pulse-space-2) var(--pulse-space-4);
+}
+
+.engineering-repair-history ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-3);
+}
+
+.engineering-repair-history__entry {
+  border: 1px solid var(--eng-border);
+  border-radius: var(--pulse-radius-md);
+  padding: var(--pulse-space-3);
+}
+
+.engineering-repair-history__meta {
+  display: flex;
+  gap: var(--pulse-space-3);
+  color: var(--eng-text-muted);
+  font-size: var(--pulse-font-size-sm);
+  margin-bottom: var(--pulse-space-2);
+}
+
+.engineering-repair-history__setting-detail {
+  list-style: none;
+  padding: 0;
+  color: var(--eng-text-muted);
+}
+
+.engineering-confirm-dialog {
+  background: var(--eng-surface);
+  border: 1px solid var(--eng-border);
+  border-radius: var(--pulse-radius-lg);
+  padding: var(--pulse-space-5);
+  max-width: 420px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-4);
+}
+
+.engineering-confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--pulse-space-3);
+}
+
+/* ---------------- Responsive ---------------- */
+
+@media (max-width: 600px) {
+  .engineering-fault-list {
+    grid-template-columns: 1fr;
+  }
+
+  .engineering-fault-card__details,
+  .engineering-detail-panel__summary {
+    grid-template-columns: 1fr;
+  }
+
+  .engineering-workspace__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

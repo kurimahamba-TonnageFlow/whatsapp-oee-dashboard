@@ -55,5 +55,42 @@ started on other tablets - the real cross-device guard remains the
   become a real cross-device status (would need a new public
   "is this line active" endpoint - deliberately not built this stage,
   since inventing one wasn't authorised).
-- Engineering and Management pages themselves (out of scope this
-  stage - only their navigation buttons exist).
+- Management pages (out of scope - only the navigation button exists).
+
+## Stage 5B — Engineering React interface (implemented)
+
+The Engineering area (`/engineering`) is no longer a placeholder. It
+is a full, live-backed React interface: `src/features/engineering/`
+(`EngineeringScreen.tsx`, `LoginScreen.tsx`, `Workspace.tsx`,
+`FaultDetailPanel.tsx`, `RepairUpdateForm.tsx`, `HandoverForm.tsx`,
+plus supporting hooks/types/validation). Every call goes to a confirmed, real
+`/api/v1/engineering/*` endpoint (`docs/engineering_integration.md`,
+`src/engineering_api.py`) - nothing here is fixture-backed.
+
+- Authentication uses protected Engineering API sessions
+  (`POST /api/v1/engineering/login`, a separate PIN and session store
+  from Management - see `src/engineering_auth.py`). The bearer token
+  is held only in React component state (`EngineeringScreen.tsx`) -
+  never written to `localStorage`, `sessionStorage`, `IndexedDB` or a
+  cookie, so a browser refresh always requires signing in again.
+- `GET /api/v1/engineering/faults` polls every 30 seconds, pausing
+  while the browser tab is hidden and refreshing immediately when it
+  becomes visible again (`useFaultPolling.ts`).
+- Accept, Add Repair Update, Close Fault and Hand Over Job
+  (`POST .../accept`, `POST .../updates`, `POST .../close`,
+  `POST .../handover`) all require an explicit confirmation step and
+  never report success until FastAPI confirms it.
+- Hand Over Job is shown only to the engineer who has accepted an
+  open fault. It requires a note, returns the fault to unassigned /
+  `Not Started` (it never reassigns it directly), and records the
+  note as a `Follow Up` repair-history entry in the same database
+  transaction.
+- Local dev: `vite.config.ts` proxies `/api` and `/health` to FastAPI
+  on `127.0.0.1:8000`.
+- No real production fault was created, accepted, updated, handed
+  over or closed while building or testing this interface - all
+  frontend tests use mocked network responses (`vi.mock('./api')`),
+  never a live Supabase connection, and manual verification of the
+  live app was limited to login and read-only fault listing.
+- Management pages (`/management`, `/management/performance`) remain
+  outstanding - still placeholders, out of scope for Stage 5B.

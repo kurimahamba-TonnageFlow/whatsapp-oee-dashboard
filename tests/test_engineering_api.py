@@ -66,6 +66,11 @@ def _dt(offset_minutes=0):
 
 
 def _downtime_event_row(**overrides):
+    # engineering_status default is 'Ongoing' (not 'Investigating'):
+    # this fixture represents an already-accepted fault, and 'Ongoing'
+    # is the actual legal value accept_engineering_fault() writes -
+    # chk_engineering_status on the live downtime_events table permits
+    # exactly 'Not Started' / 'Ongoing' / 'Resolved'.
     row = {
         "id": 12,
         "production_run_id": 40,
@@ -75,7 +80,7 @@ def _downtime_event_row(**overrides):
         "reported_by": "Marina",
         "engineer": "Alfie",
         "production_status": "Ongoing",
-        "engineering_status": "Investigating",
+        "engineering_status": "Ongoing",
         "opened_at": _dt(),
         "accepted_at": _dt(5),
         "resolved_at": None,
@@ -85,6 +90,11 @@ def _downtime_event_row(**overrides):
 
 
 def _repair_update_row(**overrides):
+    # engineering_status default is 'Ongoing' (not 'Investigating'):
+    # chk_engineering_update_status on the live engineering_updates
+    # table permits exactly 'Ongoing' / 'Resolved', and this fixture
+    # represents an interim ('Follow Up') row written while the fault
+    # is still in progress.
     row = {
         "id": 1,
         "engineer": "Alfie",
@@ -98,7 +108,7 @@ def _repair_update_row(**overrides):
         "new_value": None,
         "reason_for_change": None,
         "affected_products_or_formats": None,
-        "engineering_status": "Investigating",
+        "engineering_status": "Ongoing",
         "created_at": _dt(20),
     }
     row.update(overrides)
@@ -144,6 +154,8 @@ MACHINE_SETTING_PAYLOAD = {
     "reason_for_change": "Seal integrity failing at low line speed",
     "affected_products_or_formats": "1kg Pillow Pack - all customers",
 }
+
+HANDOVER_PAYLOAD = {"note": "Escalating to shift lead - need electrical support to continue."}
 
 
 # ==========================================================
@@ -365,7 +377,7 @@ def test_faults_listing_open_and_resolved_shapes(monkeypatch):
     open_fault = _fault_row(
         downtime_event_id=1,
         production_status="Ongoing",
-        engineering_status="Investigating",
+        engineering_status="Ongoing",
         engineer="Alfie",
         accepted_at=_dt(5),
         repair_updates=[_repair_update_row()],
@@ -451,7 +463,7 @@ def test_accept_success(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["engineer"] == "Alfie"
-    assert body["engineering_status"] == "Investigating"
+    assert body["engineering_status"] == "Ongoing"
 
 
 def test_accept_unknown_fault_returns_404(monkeypatch):
@@ -861,6 +873,216 @@ def test_close_duplicate_does_not_call_database_twice(monkeypatch):
 
 
 # ==========================================================
+# HAND OVER JOB
+# ==========================================================
+
+
+def test_handover_success(monkeypatch):
+    token = _login()
+    monkeypatch.setattr(
+        engineering_api, "get_downtime_event_by_id", lambda downtime_event_id: _downtime_event_row()
+    )
+    released_row = _downtime_event_row(
+        engineer=None, engineering_status="Not Started", accepted_at=None
+    )
+    monkeypatch.setattr(
+        engineering_api,
+        "hand_over_engineering_fault",
+        lambda downtime_event_id, handover: released_row,
+    )
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/handover",
+        json=HANDOVER_PAYLOAD,
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["engineer"] is None
+    assert body["engineering_status"] == "Not Started"
+    assert body["accepted_at"] is None
+    assert body["production_status"] == "Ongoing"
+
+
+def test_handover_passes_note_engineer_and_fixed_action_to_database(monkeypatch):
+    token = _login()
+    monkeypatch.setattr(
+        engineering_api, "get_downtime_event_by_id", lambda downtime_event_id: _downtime_event_row()
+    )
+    captured = {}
+
+    def fake_hand_over(downtime_event_id, handover):
+        captured["downtime_event_id"] = downtime_event_id
+        captured["handover"] = handover
+        return _downtime_event_row(engineer=None, engineering_status="Not Started", accepted_at=None)
+
+    monkeypatch.setattr(engineering_api, "hand_over_engineering_fault", fake_hand_over)
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/handover",
+        json=HANDOVER_PAYLOAD,
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    assert captured["downtime_event_id"] == 12
+    assert captured["handover"]["engineer"] == "Alfie"
+    assert captured["handover"]["finding"] == HANDOVER_PAYLOAD["note"]
+    assert captured["handover"]["action"] == engineering_api.HANDOVER_ACTION_TEXT
+    assert captured["handover"]["production_run_id"] == 40
+    assert captured["handover"]["fault_id"] == 3
+
+
+def test_handover_missing_note_rejected():
+    token = _login()
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/handover",
+        json={"note": "   "},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 422
+
+
+def test_handover_note_too_long_rejected():
+    token = _login()
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/handover",
+        json={"note": "x" * (engineering_api.MAX_HANDOVER_NOTE_LENGTH + 1)},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 422
+
+
+def test_handover_requires_bearer_token():
+    response = client.post("/api/v1/engineering/faults/12/handover", json=HANDOVER_PAYLOAD)
+
+    assert response.status_code == 401
+
+
+def test_handover_unknown_fault_returns_404(monkeypatch):
+    token = _login()
+    monkeypatch.setattr(engineering_api, "get_downtime_event_by_id", lambda downtime_event_id: None)
+
+    response = client.post(
+        "/api/v1/engineering/faults/999/handover",
+        json=HANDOVER_PAYLOAD,
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 404
+
+
+def test_handover_resolved_fault_returns_409(monkeypatch):
+    token = _login()
+    monkeypatch.setattr(
+        engineering_api,
+        "get_downtime_event_by_id",
+        lambda downtime_event_id: _downtime_event_row(production_status="Resolved"),
+    )
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/handover",
+        json=HANDOVER_PAYLOAD,
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 409
+
+
+def test_handover_wrong_engineer_rejected(monkeypatch):
+    dan_token = _login("Dan")
+    monkeypatch.setattr(
+        engineering_api,
+        "get_downtime_event_by_id",
+        lambda downtime_event_id: _downtime_event_row(engineer="Alfie"),
+    )
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/handover",
+        json=HANDOVER_PAYLOAD,
+        headers=_auth_headers(dan_token),
+    )
+
+    assert response.status_code == 409
+    assert "not accepted by you" in response.json()["detail"]
+
+
+def test_handover_unassigned_fault_rejected(monkeypatch):
+    # Not yet accepted by anyone - "not accepted by you" is the correct
+    # (if slightly generic) message; there is nothing to hand over.
+    token = _login()
+    monkeypatch.setattr(
+        engineering_api,
+        "get_downtime_event_by_id",
+        lambda downtime_event_id: _downtime_event_row(engineer=None, engineering_status="Not Started"),
+    )
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/handover",
+        json=HANDOVER_PAYLOAD,
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 409
+
+
+def test_handover_concurrent_or_stale_returns_409_without_reassigning(monkeypatch):
+    # Simulates: the fault was Ongoing and ours when we looked it up
+    # (pre-check), but a racing close/accept/handover committed first,
+    # so the guarded UPDATE (WHERE engineer = ours AND still Ongoing)
+    # matches zero rows - same idiom as
+    # test_accept_concurrent_protection_returns_409 /
+    # test_close_already_resolved_fault_returns_409.
+    token = _login()
+    monkeypatch.setattr(
+        engineering_api, "get_downtime_event_by_id", lambda downtime_event_id: _downtime_event_row()
+    )
+    monkeypatch.setattr(
+        engineering_api,
+        "hand_over_engineering_fault",
+        lambda downtime_event_id, handover: None,
+    )
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/handover",
+        json=HANDOVER_PAYLOAD,
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 409
+    assert "no longer assigned" in response.json()["detail"]
+
+
+def test_handover_database_failure_returns_503_without_leaking_details(monkeypatch, capsys):
+    token = _login()
+    monkeypatch.setattr(
+        engineering_api, "get_downtime_event_by_id", lambda downtime_event_id: _downtime_event_row()
+    )
+
+    def fake_hand_over(downtime_event_id, handover):
+        raise RuntimeError(f"postgresql://user:{TEST_PIN}@host/db failed")
+
+    monkeypatch.setattr(engineering_api, "hand_over_engineering_fault", fake_hand_over)
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/handover",
+        json=HANDOVER_PAYLOAD,
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 503
+    captured = capsys.readouterr()
+    assert TEST_PIN not in response.text
+    assert TEST_PIN not in captured.out
+    assert TEST_PIN not in captured.err
+
+
+# ==========================================================
 # DATABASE-LAYER ATOMICITY (close_engineering_fault)
 # ==========================================================
 #
@@ -875,9 +1097,11 @@ def test_close_duplicate_does_not_call_database_twice(monkeypatch):
 class _FakeCursor:
     def __init__(self, results):
         self._results = list(results)
+        self.calls = []
 
     def execute(self, query, params=None):
         self._last_query = query
+        self.calls.append((query, params))
 
     def fetchone(self):
         return self._results.pop(0)
@@ -960,10 +1184,269 @@ def test_close_engineering_fault_rolls_back_insert_when_already_resolved(monkeyp
     assert fake_connection.committed is False
 
 
+# ==========================================================
+# DATABASE-LAYER ATOMICITY (hand_over_engineering_fault)
+# ==========================================================
+#
+# The guarded UPDATE (release the fault) now runs FIRST, the history
+# INSERT (handover note) second - the reverse of close_engineering_fault
+# above. Same fake connection/cursor double: proves both statements
+# commit together on success, that the INSERT is never even attempted
+# when the guarded UPDATE matches no row, and that an INSERT failure
+# rolls the UPDATE back too - together, these three tests are the
+# explicit proof that no code path can ever commit only one side.
+
+HANDOVER_FIXTURE = {
+    "production_run_id": 40,
+    "fault_id": 3,
+    "engineer": "Alfie",
+    "finding": "Escalating to shift lead - need electrical support to continue.",
+    "action": engineering_api.HANDOVER_ACTION_TEXT,
+}
+
+
+def _handover_released_row(**overrides):
+    row = {
+        "id": 12, "production_run_id": 40, "fault_id": 3, "machine": "BV1",
+        "reason": "Film Jam", "reported_by": "Marina", "engineer": None,
+        "production_status": "Ongoing", "engineering_status": "Not Started",
+        "opened_at": _dt(), "accepted_at": None, "resolved_at": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_hand_over_engineering_fault_commits_once_on_success(monkeypatch):
+    released_row = _handover_released_row()
+    # UPDATE result first, INSERT result second - matches the new order.
+    fake_connection = _FakeConnection(results=[released_row, {"id": 99, "created_at": _dt(20)}])
+    monkeypatch.setattr(database, "get_database_connection", lambda: fake_connection)
+
+    result = database.hand_over_engineering_fault(12, HANDOVER_FIXTURE)
+
+    assert result == released_row
+    assert fake_connection.committed is True
+    assert fake_connection.rolled_back is False
+    assert len(fake_connection._cursor.calls) == 2
+
+
+def test_hand_over_engineering_fault_does_not_insert_history_when_update_matches_no_row(monkeypatch):
+    # The guarded UPDATE matches zero rows - the fault is no longer
+    # Ongoing/'Ongoing' engineering_status, is no longer assigned to
+    # this engineer, or was never actually accepted. Only one result is
+    # provided: if the code tried to run the INSERT anyway, fetchone()
+    # would raise IndexError on an empty list, failing this test loudly.
+    fake_connection = _FakeConnection(results=[None])
+    monkeypatch.setattr(database, "get_database_connection", lambda: fake_connection)
+
+    result = database.hand_over_engineering_fault(12, HANDOVER_FIXTURE)
+
+    assert result is None
+    assert fake_connection.rolled_back is True
+    assert fake_connection.committed is False
+    assert len(fake_connection._cursor.calls) == 1
+    update_query, _params = fake_connection._cursor.calls[0]
+    assert "UPDATE public.downtime_events" in update_query
+
+
+class _RaisesOnSecondExecuteCursor:
+    """A cursor whose UPDATE (first execute) succeeds normally, but
+    whose history INSERT (second execute) raises - proving the INSERT
+    failure path actually rolls back the connection, not just the
+    explicit `if released is None` branch above."""
+
+    def __init__(self, first_result):
+        self._first_result = first_result
+        self.calls = []
+
+    def execute(self, query, params=None):
+        self.calls.append((query, params))
+        if len(self.calls) == 2:
+            raise RuntimeError("engineering_updates insert failed")
+
+    def fetchone(self):
+        return self._first_result
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+class _RaisesOnSecondExecuteConnection:
+    def __init__(self, first_result):
+        self.cursor_double = _RaisesOnSecondExecuteCursor(first_result)
+        self.committed = False
+        self.rolled_back = False
+
+    def cursor(self, row_factory=None):
+        return self.cursor_double
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+def test_hand_over_engineering_fault_rolls_back_update_when_insert_fails(monkeypatch):
+    fake_connection = _RaisesOnSecondExecuteConnection(_handover_released_row())
+    monkeypatch.setattr(database, "get_database_connection", lambda: fake_connection)
+
+    with pytest.raises(RuntimeError, match="engineering_updates insert failed"):
+        database.hand_over_engineering_fault(12, HANDOVER_FIXTURE)
+
+    assert fake_connection.rolled_back is True
+    assert fake_connection.committed is False
+
+
+def test_hand_over_engineering_fault_records_follow_up_engineer_and_relies_on_server_timestamp(
+    monkeypatch,
+):
+    released_row = _handover_released_row()
+    fake_connection = _FakeConnection(results=[released_row, {"id": 99, "created_at": _dt(20)}])
+    monkeypatch.setattr(database, "get_database_connection", lambda: fake_connection)
+
+    database.hand_over_engineering_fault(12, HANDOVER_FIXTURE)
+
+    # INSERT is the second statement executed now (UPDATE runs first).
+    insert_query, insert_params = fake_connection._cursor.calls[1]
+    assert "'Follow Up'" in insert_query
+    assert insert_params["engineer"] == "Alfie"
+    assert insert_params["finding"] == HANDOVER_FIXTURE["finding"]
+    # created_at is never bound as a parameter here - the INSERT relies
+    # entirely on engineering_updates.created_at's existing, verified
+    # live DEFAULT now(), same as add_engineering_repair_update() and
+    # close_engineering_fault().
+    assert "created_at" not in insert_params
+
+
+def test_hand_over_engineering_fault_query_is_guarded():
+    # Ownership, production status, engineering status, and genuine
+    # acceptance are all required by the guarded UPDATE's WHERE clause.
+    source = inspect.getsource(database.hand_over_engineering_fault)
+    assert "production_status = 'Ongoing'" in source
+    assert "engineering_status = 'Ongoing'" in source
+    assert "engineer = %(engineer)s" in source
+    assert "accepted_at IS NOT NULL" in source
+    assert "engineer = NULL" in source
+    assert "accepted_at = NULL" in source
+
+
+def test_hand_over_engineering_fault_never_writes_investigating(monkeypatch):
+    # 'Investigating' is not a legal value for either
+    # downtime_events.engineering_status or
+    # engineering_updates.engineering_status per the live CHECK
+    # constraints (chk_engineering_status, chk_engineering_update_status)
+    # - only 'Not Started'/'Ongoing'/'Resolved' and 'Ongoing'/'Resolved'
+    # respectively. This function must never reintroduce that value.
+    # Checks the actual SQL text executed, not the function's docstring
+    # (which legitimately mentions 'Investigating' to explain why not).
+    released_row = _handover_released_row()
+    fake_connection = _FakeConnection(results=[released_row, {"id": 99, "created_at": _dt(20)}])
+    monkeypatch.setattr(database, "get_database_connection", lambda: fake_connection)
+
+    database.hand_over_engineering_fault(12, HANDOVER_FIXTURE)
+
+    for query, _params in fake_connection._cursor.calls:
+        assert "Investigating" not in query
+
+
+# ==========================================================
+# REGRESSION: GET /api/v1/engineering/faults 503 (2026-09-20)
+# ==========================================================
+#
+# Live symptom: GET /faults returned 503, Uvicorn logged "DATABASE
+# ERROR / Engineering operation failed: get engineering faults". Root
+# cause, confirmed with a read-only call against the live database:
+# database._TEST_DATA_EXCLUSION_SQL (spliced unparameterised into every
+# faults/dashboard WHERE clause) contained bare '%' characters inside
+# ILIKE 'TEST-%' patterns. psycopg3 parses the *entire* query text for
+# %-style placeholders whenever a params dict is passed to
+# cursor.execute(), so any unescaped '%' - even outside a placeholder -
+# raises psycopg.errors.ProgrammingError: "only '%s', '%b', '%t' are
+# allowed as placeholders, got '%'".
+#
+# The plain fake-cursor doubles used above (_FakeCursor) just store the
+# query string and never parse it, which is exactly why 275 offline
+# tests passed while the live endpoint 503'd - none of them exercised
+# psycopg's real placeholder validation. This test runs the actual
+# query get_engineering_faults() builds through psycopg's own
+# validator (the same function that raised in production), fully
+# offline: no socket, no credentials, no live database.
+
+from psycopg._queries import _split_query  # noqa: E402
+
+
+class _SyntaxCheckingCursor:
+    def __init__(self):
+        self.last_query = None
+
+    def execute(self, query, params=None):
+        self.last_query = query
+        _split_query(query.encode("utf-8"))
+
+    def fetchall(self):
+        return []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+class _SyntaxCheckingConnection:
+    def __init__(self):
+        self.cursor_double = _SyntaxCheckingCursor()
+
+    def cursor(self, row_factory=None):
+        return self.cursor_double
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+def test_get_engineering_faults_query_has_valid_psycopg_placeholder_syntax(monkeypatch):
+    fake_connection = _SyntaxCheckingConnection()
+    monkeypatch.setattr(database, "get_database_connection", lambda: fake_connection)
+
+    rows = database.get_engineering_faults({})
+
+    assert rows == []
+    assert "ILIKE" in fake_connection.cursor_double.last_query
+
+
 def test_accept_engineering_fault_query_is_guarded():
     source = inspect.getsource(database.accept_engineering_fault)
     assert "production_status = 'Ongoing'" in source
     assert "engineer IS NULL OR engineer = %(engineer)s" in source
+
+
+def test_accept_engineering_fault_writes_ongoing_not_investigating(monkeypatch):
+    # chk_engineering_status on the live downtime_events table permits
+    # exactly 'Not Started' / 'Ongoing' / 'Resolved' - 'Investigating' is
+    # not legal. Checks the actual SQL text executed, not the
+    # function's docstring (which legitimately mentions 'Investigating'
+    # to explain why not).
+    fake_connection = _FakeConnection(results=[_downtime_event_row()])
+    monkeypatch.setattr(database, "get_database_connection", lambda: fake_connection)
+
+    database.accept_engineering_fault(12, "Alfie", "2026-09-17T14:05:00+00:00")
+
+    query, _params = fake_connection._cursor.calls[0]
+    assert "engineering_status = 'Ongoing'" in query
+    assert "Investigating" not in query
 
 
 def test_close_engineering_fault_query_is_guarded():
@@ -981,6 +1464,22 @@ def test_close_engineering_fault_query_is_guarded():
 def test_add_engineering_repair_update_writes_follow_up():
     source = inspect.getsource(database.add_engineering_repair_update)
     assert "'Follow Up'" in source
+
+
+def test_add_engineering_repair_update_writes_ongoing_not_investigating(monkeypatch):
+    # chk_engineering_update_status on the live engineering_updates
+    # table permits exactly 'Ongoing' / 'Resolved' - 'Investigating' is
+    # not legal. Checks the actual SQL text executed, not the
+    # function's docstring (which legitimately mentions 'Investigating'
+    # to explain why not).
+    fake_connection = _FakeConnection(results=[{"id": 9, "created_at": _dt(20)}])
+    monkeypatch.setattr(database, "get_database_connection", lambda: fake_connection)
+
+    database.add_engineering_repair_update(12, REPAIR_UPDATE_FIXTURE)
+
+    query, _params = fake_connection._cursor.calls[0]
+    assert "'Ongoing'" in query
+    assert "Investigating" not in query
 
 
 def test_close_engineering_fault_writes_resolution():
@@ -1087,5 +1586,6 @@ def test_all_engineering_routes_are_registered():
         "/api/v1/engineering/faults/{downtime_event_id}/accept",
         "/api/v1/engineering/faults/{downtime_event_id}/updates",
         "/api/v1/engineering/faults/{downtime_event_id}/close",
+        "/api/v1/engineering/faults/{downtime_event_id}/handover",
     ]:
         assert expected in paths, f"missing route: {expected}"

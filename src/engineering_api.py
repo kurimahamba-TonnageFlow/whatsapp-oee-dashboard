@@ -31,6 +31,7 @@ try:
         close_engineering_fault,
         get_downtime_event_by_id,
         get_engineering_faults,
+        hand_over_engineering_fault,
     )
     from .domain_constants import ENGINEERS
 except ImportError:
@@ -41,6 +42,7 @@ except ImportError:
         close_engineering_fault,
         get_downtime_event_by_id,
         get_engineering_faults,
+        hand_over_engineering_fault,
     )
     from domain_constants import ENGINEERS
 
@@ -511,4 +513,96 @@ def close_fault(
         engineering_status=closed["engineering_status"],
         production_status=closed["production_status"],
         resolved_at=closed["resolved_at"],
+    )
+
+
+# ==========================================================
+# HAND OVER JOB
+# ==========================================================
+#
+# Releases an owned, still-open fault back to unassigned so a different
+# engineer can accept it - this endpoint never assigns it to anyone
+# else directly. The handover note is recorded as a 'Follow Up'
+# engineering_updates row (the only currently-permitted update_type
+# that fits an interim, non-final event - see chk_engineering_update_type
+# in migrations/0002_engineering_workflow.sql) using the existing
+# `finding` column for the note itself and a fixed `action` describing
+# what happened; `repair_classification` is left NULL, which is how the
+# fault-listing UI tells a handover apart from an ordinary repair
+# update in the history.
+
+MAX_HANDOVER_NOTE_LENGTH = MAX_REASON_LENGTH
+
+HANDOVER_ACTION_TEXT = (
+    "Job handed over; engineer unassigned and fault returned to Open Production Faults."
+)
+
+
+class HandoverRequest(BaseModel):
+    note: str = Field(max_length=MAX_HANDOVER_NOTE_LENGTH)
+
+    @field_validator("note")
+    @classmethod
+    def not_blank(cls, value):
+        stripped = value.strip()
+
+        if not stripped:
+            raise ValueError("A handover note is required.")
+
+        return stripped
+
+
+class EngineeringHandoverResponse(BaseModel):
+    status: str
+    downtime_event_id: int
+    engineer: str | None
+    engineering_status: str
+    production_status: str
+    accepted_at: datetime | None
+
+
+@router.post(
+    "/faults/{downtime_event_id}/handover", response_model=EngineeringHandoverResponse
+)
+def handover_fault(
+    downtime_event_id: int,
+    payload: HandoverRequest,
+    engineer_name: str = Depends(engineering_auth.require_engineering_session),
+):
+    fault = _load_owned_open_fault(downtime_event_id, engineer_name)
+
+    handover = {
+        "production_run_id": fault["production_run_id"],
+        "fault_id": fault["fault_id"],
+        "engineer": engineer_name,
+        "finding": payload.note,
+        "action": HANDOVER_ACTION_TEXT,
+    }
+
+    released = _safe_db_call(
+        "hand_over_engineering_fault",
+        hand_over_engineering_fault,
+        downtime_event_id,
+        handover,
+    )
+
+    if released is None:
+        # The guarded UPDATE matched zero rows: the fault was resolved,
+        # or is no longer assigned to this engineer, since the pre-check
+        # above ran - a racing close/accept/handover committed first.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Fault {downtime_event_id} is no longer assigned to you, "
+                "or has already been resolved."
+            ),
+        )
+
+    return EngineeringHandoverResponse(
+        status="success",
+        downtime_event_id=released["id"],
+        engineer=released["engineer"],
+        engineering_status=released["engineering_status"],
+        production_status=released["production_status"],
+        accepted_at=released["accepted_at"],
     )

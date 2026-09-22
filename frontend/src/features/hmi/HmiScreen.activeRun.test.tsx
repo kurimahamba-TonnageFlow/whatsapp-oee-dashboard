@@ -10,7 +10,12 @@ import type { ActiveRunRecord } from './types'
 vi.mock('./api')
 
 afterEach(() => {
-  vi.resetAllMocks()
+  // Scoped to this file's own mocks only - vi.resetAllMocks() is a
+  // process-wide reset (Vitest's mock registry is shared across every
+  // test file in a worker) and can intermittently wipe another file's
+  // still-in-flight mock configuration during a full-suite run.
+  vi.mocked(hmiApi.getHmiConfig).mockReset()
+  vi.mocked(hmiApi.completeRun).mockReset()
   window.localStorage.clear()
 })
 
