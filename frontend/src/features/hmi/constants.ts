@@ -12,6 +12,12 @@
  * reference lists.
  */
 
+/** How often Home re-reads the authoritative line state. 20s is short
+ * enough that a tablet notices another device starting a run before an
+ * operator has finished walking to the line, and light enough for a
+ * factory tablet on site Wi-Fi. Polling stops while the tab is hidden. */
+export const LINE_STATE_POLL_INTERVAL_MS = 20_000
+
 export const PRODUCTION_LINES = ['Rovema', 'GIC', 'Guill'] as const
 
 export const LINE_TECHNICIANS = [

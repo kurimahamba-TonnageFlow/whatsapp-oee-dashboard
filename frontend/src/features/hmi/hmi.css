@@ -149,7 +149,10 @@
   font-weight: 600;
 }
 
-.hmi-field input,
+/* Text-entry controls only. A radio or checkbox given this 48px-tall,
+   full-width, bordered treatment renders as a large empty box detached
+   from its label, so both are excluded here and styled below. */
+.hmi-field input:not([type='radio']):not([type='checkbox']),
 .hmi-field select,
 .hmi-field textarea {
   min-height: 48px;
@@ -160,6 +163,30 @@
   color: var(--hmi-text);
   font-weight: 400;
   font-size: 1rem;
+}
+
+/* A radio or checkbox sits inline beside its own label text, with the
+   whole row as a 44px touch target (the label is clickable, so the row
+   is the target, not just the 24px control). */
+.hmi-radio,
+.hmi-field--checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--pulse-space-3);
+  min-height: 44px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hmi-radio input[type='radio'],
+.hmi-field--checkbox input[type='checkbox'] {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--hmi-accent);
 }
 
 .hmi-field textarea {
@@ -246,6 +273,18 @@
 .hmi-status-pill--blue {
   background: rgba(76, 141, 255, 0.18);
   color: var(--hmi-accent);
+}
+
+/* State not known yet - deliberately neutral, never reads as "fine". */
+.hmi-status-pill--grey {
+  background: rgba(148, 163, 184, 0.22);
+  color: #cbd5e1;
+}
+
+.hmi-line-card__detail {
+  margin: 0;
+  font-size: var(--pulse-font-size-sm);
+  color: #cbd5e1;
 }
 
 /* ---------------- Progress bar ---------------- */

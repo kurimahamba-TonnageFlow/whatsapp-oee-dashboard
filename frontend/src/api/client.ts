@@ -20,6 +20,11 @@ export class ApiRequestError extends Error {
 export interface RequestOptions {
   token?: string
   signal?: AbortSignal
+  /** Sent as `Idempotency-Key`. Required by every HMI write endpoint:
+   * the same key must be reused for every retry of one logical action,
+   * so the server replays the original response instead of writing
+   * twice (see docs/hmi_integration.md). */
+  idempotencyKey?: string
 }
 
 function getApiBaseUrl(): string {
@@ -48,6 +53,9 @@ async function request<T>(
   }
   if (options.token) {
     headers.Authorization = `Bearer ${options.token}`
+  }
+  if (options.idempotencyKey) {
+    headers['Idempotency-Key'] = options.idempotencyKey
   }
 
   let response: Response

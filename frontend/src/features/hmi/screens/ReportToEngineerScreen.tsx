@@ -1,14 +1,20 @@
 import { useState } from 'react'
 import type { HmiConfigMachine } from '../../../types/api'
-import type { EngineerReportResult } from '../awaitingApiIntegration'
+import type { FaultReportResponse } from '../types'
 
 interface ReportToEngineerScreenProps {
   productionLine: string
   machines: HmiConfigMachine[]
   isSubmitting: boolean
-  result: EngineerReportResult | null
+  result: FaultReportResponse | null
   errorMessage: string | null
-  onSubmit: (input: { machine: string; faultReason: string; note: string }) => void
+  onSubmit: (input: {
+    machine: string
+    machineId: number | null
+    buttonId: number | null
+    reason: string
+    note: string
+  }) => void
   onCancel: () => void
   onDone: () => void
 }
@@ -24,6 +30,7 @@ export function ReportToEngineerScreen({
   onDone,
 }: ReportToEngineerScreenProps) {
   const [machine, setMachine] = useState('')
+  const [buttonId, setButtonId] = useState('')
   const [faultReason, setFaultReason] = useState('')
   const [note, setNote] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
@@ -32,7 +39,10 @@ export function ReportToEngineerScreen({
     return (
       <div className="hmi-screen hmi-report-engineer" role="status">
         <p className="hmi-run-started__mark">✓ Reported to Engineering</p>
-        <p>Reference: {result.reference}</p>
+        <p>
+          Fault {result.fault_id} on {result.machine} is now with Engineering (
+          {result.engineering_status}).
+        </p>
         <div className="hmi-form-actions">
           <button type="button" className="hmi-primary-button" onClick={onDone}>
             Back to Active Run
@@ -43,15 +53,32 @@ export function ReportToEngineerScreen({
   }
 
   const selectedMachine = machines.find((m) => m.name === machine)
-  const faultButtons = selectedMachine?.buttons.filter((b) => b.event_type === 'unplanned_fault') ?? []
+  const faultButtons =
+    selectedMachine?.buttons.filter((b) => b.event_type === 'unplanned_fault') ?? []
+  const selectedButton = faultButtons.find((b) => String(b.id) === buttonId)
+  const noteRequired = !selectedButton
 
   function handleSubmit() {
-    if (!machine.trim() || !faultReason.trim()) {
+    const reason = selectedButton ? selectedButton.name : faultReason.trim()
+
+    if (!machine.trim() || !reason) {
       setValidationError('Select a machine and a fault reason.')
       return
     }
+
+    if (noteRequired && !note.trim()) {
+      setValidationError('Add a note describing the fault when no fault button is selected.')
+      return
+    }
+
     setValidationError(null)
-    onSubmit({ machine, faultReason, note })
+    onSubmit({
+      machine: machine.trim(),
+      machineId: selectedMachine ? selectedMachine.id : null,
+      buttonId: selectedButton ? selectedButton.id : null,
+      reason,
+      note: note.trim(),
+    })
   }
 
   return (
@@ -61,7 +88,14 @@ export function ReportToEngineerScreen({
       <label className="hmi-field">
         Machine or section
         {machines.length > 0 ? (
-          <select value={machine} onChange={(e) => { setMachine(e.target.value); setFaultReason('') }}>
+          <select
+            value={machine}
+            onChange={(e) => {
+              setMachine(e.target.value)
+              setButtonId('')
+              setFaultReason('')
+            }}
+          >
             <option value="">Select…</option>
             {machines.map((m) => (
               <option key={m.id} value={m.name}>
@@ -82,10 +116,10 @@ export function ReportToEngineerScreen({
       <label className="hmi-field">
         Fault reason
         {faultButtons.length > 0 ? (
-          <select value={faultReason} onChange={(e) => setFaultReason(e.target.value)}>
+          <select value={buttonId} onChange={(e) => setButtonId(e.target.value)}>
             <option value="">Select…</option>
             {faultButtons.map((button) => (
-              <option key={button.id} value={button.name}>
+              <option key={button.id} value={String(button.id)}>
                 {button.name}
               </option>
             ))}
@@ -101,7 +135,7 @@ export function ReportToEngineerScreen({
       </label>
 
       <label className="hmi-field">
-        Note (optional)
+        {noteRequired ? 'Note (required)' : 'Note (optional)'}
         <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} />
       </label>
 

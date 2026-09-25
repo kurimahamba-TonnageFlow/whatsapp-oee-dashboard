@@ -16,6 +16,10 @@ export const ENGINEERS = ['Aaron', 'Yago', 'Steve', 'Dan', 'Kuri', 'Alfie'] as c
 
 export const REPAIR_CLASSIFICATIONS = ['Mechanical', 'Machine Setting'] as const
 
+/** Answers to "Could this fault have been prevented by planned
+ * maintenance?", required at closure. */
+export const MAINTENANCE_PREVENTABLE_OPTIONS = ['Yes', 'No', 'Unsure'] as const
+
 export const MAX_TEXT_LENGTH = 2000
 export const MAX_SHORT_FIELD_LENGTH = 200
 export const MAX_REASON_LENGTH = 500

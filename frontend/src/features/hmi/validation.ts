@@ -1,5 +1,5 @@
 import { validatePackWeight } from './packWeight'
-import type { StartRunFormValues } from './types'
+import type { CompleteRunFormValues, StartRunFormValues } from './types'
 
 export type StartRunFormErrors = Partial<Record<keyof StartRunFormValues, string>>
 
@@ -18,6 +18,86 @@ const REQUIRED_TEXT_FIELDS: Array<keyof StartRunFormValues> = [
 
 function isBlank(value: string): boolean {
   return value.trim().length === 0
+}
+
+// ------------------------------------------------------------
+// Capture inputs (hourly update, changeover, Complete Run)
+// ------------------------------------------------------------
+// These mirror the backend's own rules (src/pulse_capture_api.py) but
+// never replace them - FastAPI validates every request again.
+
+const DECIMAL_PATTERN = /^\d+(\.\d{1,4})?$/
+const WHOLE_NUMBER_PATTERN = /^\d+$/
+
+/** Pallets are decimal-safe: "3.75" is valid, "0" is valid (the line
+ * produced nothing), anything negative or non-numeric is not. */
+export function validatePalletsInput(
+  value: string,
+  options: { allowZero?: boolean } = {},
+): string | undefined {
+  const { allowZero = true } = options
+  const trimmed = value.trim()
+
+  if (isBlank(trimmed)) return 'Enter the pallets produced, for example 3.75.'
+  if (!DECIMAL_PATTERN.test(trimmed)) {
+    return 'Enter pallets as a number with up to 4 decimal places, for example 3.75.'
+  }
+  if (Number(trimmed) > 1000) return 'That is more than 1000 pallets - check the figure.'
+  if (!allowZero && Number(trimmed) === 0) return 'Enter the pallets produced since the last update.'
+
+  return undefined
+}
+
+export function validateXrayCountInput(value: string): string | undefined {
+  const trimmed = value.trim()
+
+  if (isBlank(trimmed)) return 'Enter the X-ray pack count, or select Count unavailable.'
+  if (!WHOLE_NUMBER_PATTERN.test(trimmed)) return 'Enter the X-ray pack count as a whole number.'
+  if (Number(trimmed) > 10_000_000) return 'That count looks too high - check the figure.'
+
+  return undefined
+}
+
+export function validatePackWeightInput(value: string): string | undefined {
+  const trimmed = value.trim()
+
+  if (isBlank(trimmed)) return 'Enter the new pack weight in kg.'
+  if (!DECIMAL_PATTERN.test(trimmed)) return 'Enter the pack weight in kg, for example 1 or 4.5.'
+  if (Number(trimmed) <= 0) return 'Pack weight must be more than zero.'
+
+  return undefined
+}
+
+export function validateRequiredText(value: string, label: string): string | undefined {
+  return isBlank(value) ? `${label} is required.` : undefined
+}
+
+/** Complete Run needs the final production answer before anything else:
+ * any output made since the last hourly update has to be captured
+ * before the X-ray count can be compared against it. */
+export function completeRunFormErrors(values: CompleteRunFormValues) {
+  const errors: Partial<Record<keyof CompleteRunFormValues, string>> = {}
+
+  if (values.productionSinceLastUpdate === '') {
+    errors.productionSinceLastUpdate =
+      'Answer whether anything has been produced since the last update.'
+  }
+
+  if (values.productionSinceLastUpdate === 'yes') {
+    const palletsError = validatePalletsInput(values.finalPallets, { allowZero: false })
+    if (palletsError) errors.finalPallets = palletsError
+  }
+
+  if (values.countUnavailable) {
+    if (!values.unavailableReason.trim()) {
+      errors.unavailableReason = 'Give a reason why the X-ray count is unavailable.'
+    }
+  } else {
+    const countError = validateXrayCountInput(values.xrayPackCount)
+    if (countError) errors.xrayPackCount = countError
+  }
+
+  return errors
 }
 
 /** Blank shows "Required."; a filled-in but non-positive value shows

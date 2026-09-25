@@ -7,7 +7,11 @@
  * again server-side.
  */
 import { MAX_HANDOVER_NOTE_LENGTH, MAX_REASON_LENGTH, MAX_SHORT_FIELD_LENGTH, MAX_TEXT_LENGTH } from './constants'
-import type { RepairClassification } from './types'
+import type { MaintenancePreventable, RepairClassification } from './types'
+
+/** 'update' = interim repair update; 'close' additionally requires the
+ * maintenance-preventability answer. */
+export type RepairFormMode = 'update' | 'close'
 
 export interface RepairUpdateFormValues {
   classification: RepairClassification | ''
@@ -19,6 +23,8 @@ export interface RepairUpdateFormValues {
   newValue: string
   reasonForChange: string
   affectedProductsOrFormats: string
+  /** Empty until the engineer deliberately chooses - never preselected. */
+  maintenancePreventable: MaintenancePreventable | ''
 }
 
 export const EMPTY_REPAIR_UPDATE_FORM: RepairUpdateFormValues = {
@@ -31,9 +37,11 @@ export const EMPTY_REPAIR_UPDATE_FORM: RepairUpdateFormValues = {
   newValue: '',
   reasonForChange: '',
   affectedProductsOrFormats: '',
+  maintenancePreventable: '',
 }
 
 export interface RepairUpdateFormErrors {
+  maintenancePreventable?: string
   classification?: string
   finding?: string
   action?: string
@@ -58,11 +66,19 @@ function optionalText(value: string, maxLength: number, label: string): string |
   return undefined
 }
 
-export function validateRepairUpdateForm(values: RepairUpdateFormValues): RepairUpdateFormErrors {
+export function validateRepairUpdateForm(
+  values: RepairUpdateFormValues,
+  mode: RepairFormMode = 'update',
+): RepairUpdateFormErrors {
   const errors: RepairUpdateFormErrors = {}
 
   if (!values.classification) {
     errors.classification = 'Select Mechanical or Machine Setting.'
+  }
+
+  if (mode === 'close' && !values.maintenancePreventable) {
+    errors.maintenancePreventable =
+      'Answer whether planned maintenance could have prevented this fault.'
   }
 
   const findingError = requiredText(values.finding, MAX_TEXT_LENGTH, 'Finding')
@@ -106,7 +122,10 @@ export function hasFormErrors(errors: RepairUpdateFormErrors): boolean {
  * body shape - Machine Setting fields are omitted (not blank strings)
  * for a Mechanical update, matching the backend's "must not include
  * Machine Setting fields" rule. */
-export function toRepairUpdatePayload(values: RepairUpdateFormValues) {
+export function toRepairUpdatePayload(
+  values: RepairUpdateFormValues,
+  mode: RepairFormMode = 'update',
+) {
   const classification = values.classification as RepairClassification
 
   const base = {
@@ -114,6 +133,9 @@ export function toRepairUpdatePayload(values: RepairUpdateFormValues) {
     finding: values.finding.trim(),
     action: values.action.trim(),
     notes: values.notes.trim() || null,
+    ...(mode === 'close'
+      ? { maintenance_preventable: values.maintenancePreventable as MaintenancePreventable }
+      : {}),
   }
 
   if (classification !== 'Machine Setting') {

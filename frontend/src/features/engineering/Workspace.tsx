@@ -5,7 +5,7 @@ import { ConfirmDialog } from './ConfirmDialog'
 import { FaultDetailPanel } from './FaultDetailPanel'
 import { FaultList } from './FaultList'
 import { useFaultPolling } from './useFaultPolling'
-import type { EngineeringFault, RepairUpdatePayload } from './types'
+import type { CloseFaultPayload, EngineeringFault, RepairUpdatePayload } from './types'
 
 type TabKey = 'open' | 'mine' | 'resolved'
 
@@ -44,6 +44,11 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
 
   const [isSubmittingClose, setIsSubmittingClose] = useState(false)
   const [closeError, setCloseError] = useState<string | null>(null)
+  const [closeSuccessMessage, setCloseSuccessMessage] = useState<string | null>(null)
+  /** The close was confirmed by the backend but the follow-up read
+   * failed, so the lists below are stale. Never presented as a failed
+   * close. */
+  const [closeRefreshFailed, setCloseRefreshFailed] = useState(false)
 
   const [isSubmittingHandover, setIsSubmittingHandover] = useState(false)
   const [handoverError, setHandoverError] = useState<string | null>(null)
@@ -112,16 +117,29 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
       .finally(() => setIsSubmittingUpdate(false))
   }
 
-  function handleConfirmClose(payload: RepairUpdatePayload) {
+  function handleConfirmClose(payload: CloseFaultPayload) {
     if (!selectedFault || isSubmittingClose) return
+    const closing = selectedFault
     setIsSubmittingClose(true)
     setCloseError(null)
+    setCloseRefreshFailed(false)
 
     engineeringApi
-      .closeFault(token, selectedFault.downtime_event_id, payload)
-      .then(() => {
+      .closeFault(token, closing.downtime_event_id, payload)
+      .then(async (response) => {
+        // The backend has confirmed it. Dismiss the panel, say so, and
+        // move to where the fault now lives - then take the authoritative
+        // read as the source of every list and count. Nothing here edits
+        // a local counter.
         setSelectedFaultId(null)
-        refresh()
+        setCloseSuccessMessage(
+          `${closing.machine} — ${closing.reason} is now ${response.production_status}.`,
+        )
+        setActiveTab('resolved')
+
+        const refreshed = await refresh()
+        // A failed read after a confirmed close does not undo the close.
+        setCloseRefreshFailed(!refreshed)
       })
       .catch((error: unknown) => {
         if (error instanceof ApiRequestError && error.status === 401) {
@@ -163,6 +181,14 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
     setUpdateSuccessMessage(null)
     setCloseError(null)
     setHandoverError(null)
+  }
+
+  /** Opening another fault clears the previous close confirmation, so a
+   * stale "closed" note can never sit above a different fault. */
+  function selectFault(downtimeEventId: number) {
+    setCloseSuccessMessage(null)
+    setCloseRefreshFailed(false)
+    setSelectedFaultId(downtimeEventId)
   }
 
   const activeFaults = activeTab === 'open' ? openFaults : activeTab === 'mine' ? myFaults : resolvedFaults
@@ -208,6 +234,22 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
         </p>
       )}
 
+      {closeSuccessMessage && (
+        <p className="engineering-success-note" role="status">
+          ✓ Fault closed. {closeSuccessMessage}
+        </p>
+      )}
+
+      {/* The close itself was confirmed; only the follow-up read failed,
+          so this says the lists are stale rather than implying the close
+          did not happen. */}
+      {closeRefreshFailed && (
+        <p className="engineering-inline-error" role="alert">
+          The fault was closed, but the list below could not be refreshed. Press Refresh to see
+          the current state.
+        </p>
+      )}
+
       <div className="engineering-summary-counts">
         <span>Open: {openFaults.length}</span>
         <span>Mine: {myFaults.length}</span>
@@ -246,7 +288,7 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
           faults={activeFaults}
           emptyMessage={emptyMessage}
           canAccept={(fault) => activeTab === 'open' && fault.engineer === null}
-          onSelect={(fault) => setSelectedFaultId(fault.downtime_event_id)}
+          onSelect={(fault) => selectFault(fault.downtime_event_id)}
           onAccept={requestAccept}
         />
       )}

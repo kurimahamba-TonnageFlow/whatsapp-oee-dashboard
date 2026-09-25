@@ -21,7 +21,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="app-shell">
       <header className="app-shell__header">
-        <p className="app-shell__title">TonnageFlow Pulse</p>
+        <p className="app-shell__title">Tonnage Flow Pulse</p>
         <ApiStatus />
       </header>
 

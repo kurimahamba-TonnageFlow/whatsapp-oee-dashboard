@@ -74,10 +74,15 @@ export interface EngineeringAcceptResponse {
   accepted_at: string | null
 }
 
+/** "Could this fault have been prevented by planned maintenance?" -
+ * required when closing a fault (src/engineering_api.py:
+ * CloseFaultRequest). Never inferred from notes. */
+export type MaintenancePreventable = 'Yes' | 'No' | 'Unsure'
+
 /**
- * POST /api/v1/engineering/faults/{id}/updates and
- * POST /api/v1/engineering/faults/{id}/close share this exact request
- * body shape (src/engineering_api.py: RepairUpdateRequest).
+ * POST /api/v1/engineering/faults/{id}/updates request body
+ * (src/engineering_api.py: RepairUpdateRequest). Closing a fault uses
+ * the same shape plus maintenance_preventable - see CloseFaultPayload.
  */
 export interface RepairUpdatePayload {
   classification: RepairClassification
@@ -89,6 +94,11 @@ export interface RepairUpdatePayload {
   new_value?: string | null
   reason_for_change?: string | null
   affected_products_or_formats?: string | null
+}
+
+/** POST /api/v1/engineering/faults/{id}/close request body. */
+export interface CloseFaultPayload extends RepairUpdatePayload {
+  maintenance_preventable: MaintenancePreventable
 }
 
 /** POST /api/v1/engineering/faults/{id}/updates response (200). */
@@ -107,6 +117,9 @@ export interface EngineeringCloseResponse {
   engineering_status: string
   production_status: string
   resolved_at: string | null
+  /** Echoed back from the stored fault. Null only for a fault closed
+   * before this answer was required. */
+  maintenance_preventable: MaintenancePreventable | null
 }
 
 /** POST /api/v1/engineering/faults/{id}/handover request body. */

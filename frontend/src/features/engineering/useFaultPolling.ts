@@ -16,7 +16,10 @@ interface UseFaultPollingResult {
   /** Set when a background refresh fails but earlier data remains visible. */
   refreshError: string | null
   lastRefreshedAt: Date | null
-  refresh: () => void
+  /** Resolves true when the list was actually re-read. A caller whose
+   * write has already been confirmed needs to know this, so it can say
+   * the list is stale rather than imply the write failed. */
+  refresh: () => Promise<boolean>
 }
 
 /**
@@ -45,8 +48,8 @@ export function useFaultPolling(
   const hasLoadedRef = useRef(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const load = useCallback(() => {
-    if (!token) return
+  const load = useCallback(async (): Promise<boolean> => {
+    if (!token) return false
 
     // A newer request always replaces whatever was still running.
     abortRef.current?.abort()
@@ -57,45 +60,45 @@ export function useFaultPolling(
       setIsRefreshing(true)
     }
 
-    getFaults(token, controller.signal)
-      .then((response) => {
-        if (controller.signal.aborted) return
-        setFaults(response.items)
-        setLoadError(null)
-        setRefreshError(null)
-        setLastRefreshedAt(new Date())
-        hasLoadedRef.current = true
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return
+    try {
+      const response = await getFaults(token, controller.signal)
+      if (controller.signal.aborted) return false
 
-        if (error instanceof ApiRequestError && error.status === 401) {
-          onSessionExpired()
-          return
-        }
+      setFaults(response.items)
+      setLoadError(null)
+      setRefreshError(null)
+      setLastRefreshedAt(new Date())
+      hasLoadedRef.current = true
+      return true
+    } catch (error: unknown) {
+      if (controller.signal.aborted) return false
 
-        const message =
-          error instanceof ApiRequestError
-            ? error.message
-            : 'Could not load Engineering faults. Please try again.'
+      if (error instanceof ApiRequestError && error.status === 401) {
+        onSessionExpired()
+        return false
+      }
 
-        if (hasLoadedRef.current) {
-          setRefreshError(message)
-        } else {
-          setLoadError(message)
-        }
-      })
-      .finally(() => {
-        if (controller.signal.aborted) return
+      const message =
+        error instanceof ApiRequestError
+          ? error.message
+          : 'Could not load Engineering faults. Please try again.'
+
+      if (hasLoadedRef.current) {
+        setRefreshError(message)
+      } else {
+        setLoadError(message)
+      }
+      return false
+    } finally {
+      if (!controller.signal.aborted) {
         setIsLoading(false)
         setIsRefreshing(false)
-      })
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
-  const refresh = useCallback(() => {
-    load()
-  }, [load])
+  const refresh = useCallback(() => load(), [load])
 
   useEffect(() => {
     if (!token) {
@@ -111,11 +114,11 @@ export function useFaultPolling(
       return
     }
 
-    load()
+    void load()
 
     function startInterval() {
       if (intervalRef.current) clearInterval(intervalRef.current)
-      intervalRef.current = setInterval(load, FAULT_POLL_INTERVAL_MS)
+      intervalRef.current = setInterval(() => void load(), FAULT_POLL_INTERVAL_MS)
     }
 
     function handleVisibilityChange() {
@@ -128,7 +131,7 @@ export function useFaultPolling(
       }
 
       // Became visible again - refresh immediately, then resume polling.
-      load()
+      void load()
       startInterval()
     }
 

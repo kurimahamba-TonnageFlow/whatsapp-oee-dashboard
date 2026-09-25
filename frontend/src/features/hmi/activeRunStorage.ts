@@ -1,28 +1,30 @@
-import type { ActiveRunRecord } from './types'
+import type { StoredActiveRun } from './types'
 
-const STORAGE_KEY = 'pulse.hmi.activeRun.v1'
+// v2: only the run id and line. A v1 record (which cached form values
+// and totals on the device) is deliberately ignored - saved progress
+// now always comes from the backend.
+const STORAGE_KEY = 'pulse.hmi.activeRun.v2'
 
 /**
- * This-device-only persistence for the run currently in progress.
- * There is no live "get active run" endpoint the public HMI can call
- * (see docs/hmi_integration.md - only the PIN-protected Management
- * API has one, and this stage must not use it), so this local record
- * is what lets a page refresh restore the Active Run screen instead
- * of losing track of it (requirement: refreshing must not falsely
- * show a completed action). It reflects a real, API-confirmed Start
- * Run - it is not a fixture.
+ * Remembers ONLY which run this tablet is working on, so a refresh can
+ * ask the backend for its current state
+ * (GET /api/v1/runs/{id}/hmi-state). Production totals, planned
+ * downtime and changeovers are never restored from here - they are
+ * always re-read from the database, so this device can never show
+ * saved progress the server does not have.
  */
-export function loadActiveRun(): ActiveRunRecord | null {
+export function loadActiveRun(): StoredActiveRun | null {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
-    return JSON.parse(raw) as ActiveRunRecord
+    const parsed = JSON.parse(raw) as StoredActiveRun
+    return typeof parsed?.runId === 'number' ? parsed : null
   } catch {
     return null
   }
 }
 
-export function saveActiveRun(record: ActiveRunRecord): void {
+export function saveActiveRun(record: StoredActiveRun): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(record))
   } catch {

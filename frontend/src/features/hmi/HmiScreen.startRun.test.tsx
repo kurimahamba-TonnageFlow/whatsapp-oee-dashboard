@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HmiScreen } from './HmiScreen'
 import * as hmiApi from './api'
 import { CUSTOMERS, LINE_TECHNICIANS, PRODUCTION_LINES, PRODUCTS } from './constants'
+import { activeLine, allLinesAvailable, availableLine, lineStateResponse } from './hmiTestState'
 
 vi.mock('./api')
 
@@ -13,6 +14,7 @@ afterEach(() => {
   // test file in a worker) and can intermittently wipe another file's
   // still-in-flight mock configuration during a full-suite run.
   vi.mocked(hmiApi.getHmiConfig).mockReset()
+  vi.mocked(hmiApi.getLineState).mockReset()
   vi.mocked(hmiApi.startRun).mockReset()
   window.localStorage.clear()
 })
@@ -33,10 +35,14 @@ function renderHmi() {
 
 async function openStartRunForm(lineName = 'Rovema') {
   vi.mocked(hmiApi.getHmiConfig).mockResolvedValue(READY_CONFIG)
+  vi.mocked(hmiApi.getLineState).mockResolvedValue(allLinesAvailable())
   renderHmi()
   await waitFor(() => expect(screen.getByText(lineName)).toBeInTheDocument())
   const card = screen.getByText(lineName).closest('article') as HTMLElement
-  fireEvent.click(within(card).getByRole('button', { name: /start run/i }))
+  // Start Run stays disabled until the backend confirms the line is free.
+  const startButton = within(card).getByRole('button', { name: /start run/i })
+  await waitFor(() => expect(startButton).toBeEnabled())
+  fireEvent.click(startButton)
 }
 
 function fillValidForm() {
@@ -64,10 +70,13 @@ describe('HmiScreen Start Run form', () => {
     for (const line of PRODUCTION_LINES) {
       const { unmount } = await (async () => {
         vi.mocked(hmiApi.getHmiConfig).mockResolvedValue(READY_CONFIG)
+        vi.mocked(hmiApi.getLineState).mockResolvedValue(allLinesAvailable())
         const result = renderHmi()
         await waitFor(() => expect(screen.getByText(line)).toBeInTheDocument())
         const card = screen.getByText(line).closest('article') as HTMLElement
-        fireEvent.click(within(card).getByRole('button', { name: /start run/i }))
+        const startButton = within(card).getByRole('button', { name: /start run/i })
+        await waitFor(() => expect(startButton).toBeEnabled())
+        fireEvent.click(startButton)
         return result
       })()
 
@@ -235,8 +244,40 @@ describe('HmiScreen Start Run form', () => {
     fireEvent.click(screen.getByRole('button', { name: /confirm start run/i }))
 
     await waitFor(() =>
-      expect(screen.getByText('This line already has an active run.')).toBeInTheDocument(),
+      expect(screen.getByText(/another device started a run on this line first/i)).toBeInTheDocument(),
     )
+    expect(screen.getByText(/nothing was saved here/i)).toBeInTheDocument()
     expect(screen.queryByText(/production line 'rovema'/i)).not.toBeInTheDocument()
+  })
+
+  it('re-reads the authoritative line state after losing the race, and creates no second run', async () => {
+    const { ApiRequestError } = await import('../../api/client')
+    vi.mocked(hmiApi.startRun).mockRejectedValue(
+      new ApiRequestError(409, "Production Line 'Rovema' already has an active Production Run."),
+    )
+
+    await openStartRunForm()
+    const pollsBefore = vi.mocked(hmiApi.getLineState).mock.calls.length
+
+    // The other device's run is what the backend now reports.
+    vi.mocked(hmiApi.getLineState).mockResolvedValue(
+      lineStateResponse([
+        activeLine({ line_id: 1, production_line: 'Rovema', run_id: 4101 }),
+        availableLine({ line_id: 2, production_line: 'GIC' }),
+        availableLine({ line_id: 3, production_line: 'Guill' }),
+      ]),
+    )
+
+    fillValidForm()
+    fireEvent.click(screen.getByRole('button', { name: /review run/i }))
+    fireEvent.click(screen.getByRole('button', { name: /confirm start run/i }))
+
+    await waitFor(() =>
+      expect(vi.mocked(hmiApi.getLineState).mock.calls.length).toBeGreaterThan(pollsBefore),
+    )
+    // The constraint is the final authority - exactly one attempt was
+    // made, and nothing was retried automatically.
+    expect(hmiApi.startRun).toHaveBeenCalledTimes(1)
+    expect(window.localStorage.length).toBe(0)
   })
 })

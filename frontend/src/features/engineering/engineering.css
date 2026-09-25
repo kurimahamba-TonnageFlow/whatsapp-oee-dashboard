@@ -370,25 +370,86 @@
   z-index: 20;
 }
 
+/* The panel itself never scrolls: the header is pinned and only the body
+   scrolls beneath it, so the engineer always sees which fault they are
+   working on and how to leave. */
 .engineering-detail-panel {
   background: var(--eng-surface);
   border: 1px solid var(--eng-border);
   border-radius: var(--pulse-radius-lg);
-  padding: var(--pulse-space-5);
   max-width: 640px;
   width: 100%;
   max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The panel is focused programmatically when it opens, so the keyboard
+   starts inside the dialog. It is a container, not a control, so it
+   shows no focus ring of its own - the ring belongs on whichever field
+   or button the engineer moves to next. */
+/* Specificity note: the shared `.engineering-screen [tabindex]:focus-visible`
+   rule above would otherwise draw a ring around the whole dialog. */
+.engineering-detail-panel[tabindex]:focus,
+.engineering-detail-panel[tabindex]:focus-visible {
+  outline: none;
+}
+
+.engineering-detail-panel__header {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--pulse-space-3);
+  padding: var(--pulse-space-5);
+  border-bottom: 1px solid var(--eng-border);
+}
+
+.engineering-detail-panel__body {
+  flex: 1 1 auto;
   overflow-y: auto;
+  /* A permanent gutter plus an always-drawn thumb, so "there is more
+     below" is shown rather than left to be discovered. The standard
+     `scrollbar-width` is deliberately NOT set: in current Chrome it
+     disables the ::-webkit-scrollbar rules below and falls back to
+     overlay scrollbars, which paint nothing while the list is idle. */
+  scrollbar-gutter: stable;
+  padding: var(--pulse-space-5);
   display: flex;
   flex-direction: column;
   gap: var(--pulse-space-4);
 }
 
-.engineering-detail-panel__header {
+.engineering-detail-panel__body::-webkit-scrollbar {
+  width: 12px;
+}
+
+.engineering-detail-panel__body::-webkit-scrollbar-track {
+  background: rgba(148, 163, 184, 0.1);
+  border-radius: 999px;
+}
+
+.engineering-detail-panel__body::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* The submit row stays reachable at the bottom of the form while the
+   fields above it scroll. It is the form's last child, so content is
+   never hidden underneath it. */
+.engineering-repair-form .engineering-form-actions {
+  position: sticky;
+  bottom: calc(var(--pulse-space-5) * -1);
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  justify-content: flex-end;
   gap: var(--pulse-space-3);
+  padding: var(--pulse-space-3) 0;
+  margin-top: var(--pulse-space-2);
+  background: var(--eng-surface);
+  border-top: 1px solid var(--eng-border);
 }
 
 .engineering-detail-panel__summary {

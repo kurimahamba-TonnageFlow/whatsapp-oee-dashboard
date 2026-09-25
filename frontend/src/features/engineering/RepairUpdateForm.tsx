@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 import { FieldError } from './FieldError'
-import { REPAIR_CLASSIFICATIONS, MAX_TEXT_LENGTH, MAX_SHORT_FIELD_LENGTH, MAX_REASON_LENGTH } from './constants'
+import {
+  MAINTENANCE_PREVENTABLE_OPTIONS,
+  MAX_REASON_LENGTH,
+  MAX_SHORT_FIELD_LENGTH,
+  MAX_TEXT_LENGTH,
+  REPAIR_CLASSIFICATIONS,
+} from './constants'
 import {
   EMPTY_REPAIR_UPDATE_FORM,
   hasFormErrors,
@@ -8,15 +14,16 @@ import {
   validateRepairUpdateForm,
   type RepairUpdateFormValues,
 } from './validation'
-import type { RepairUpdatePayload } from './types'
+import type { CloseFaultPayload, RepairUpdatePayload } from './types'
 
 interface RepairUpdateFormProps {
-  /** "Add Repair Update" for /updates, "Close Fault" for /close - only
-   * the submit button label, confirmation copy and outer flow differ;
-   * the fields and validation are identical either way. */
+  /** "Add Repair Update" for /updates, "Close Fault" for /close. The
+   * repair fields and their validation are identical either way;
+   * closing additionally requires the maintenance-preventability
+   * answer, which the backend stores on the fault. */
   mode: 'update' | 'close'
   isSubmitting: boolean
-  onSubmit: (payload: RepairUpdatePayload) => void
+  onSubmit: (payload: RepairUpdatePayload | CloseFaultPayload) => void
   /** Bump this (e.g. a counter) once the parent confirms FastAPI
    * accepted the submission - clears the form only at that point,
    * never on a failed submission (entered text must survive a
@@ -26,15 +33,15 @@ interface RepairUpdateFormProps {
 
 export function RepairUpdateForm({ mode, isSubmitting, onSubmit, resetSignal }: RepairUpdateFormProps) {
   const [values, setValues] = useState<RepairUpdateFormValues>(EMPTY_REPAIR_UPDATE_FORM)
-  const [errors, setErrors] = useState(validateRepairUpdateForm(EMPTY_REPAIR_UPDATE_FORM))
+  const [errors, setErrors] = useState(validateRepairUpdateForm(EMPTY_REPAIR_UPDATE_FORM, mode))
   const [touched, setTouched] = useState(false)
 
   useEffect(() => {
     if (resetSignal === undefined) return
     setValues(EMPTY_REPAIR_UPDATE_FORM)
-    setErrors(validateRepairUpdateForm(EMPTY_REPAIR_UPDATE_FORM))
+    setErrors(validateRepairUpdateForm(EMPTY_REPAIR_UPDATE_FORM, mode))
     setTouched(false)
-  }, [resetSignal])
+  }, [resetSignal, mode])
 
   function setField<K extends keyof RepairUpdateFormValues>(key: K, value: RepairUpdateFormValues[K]) {
     setValues((current) => ({ ...current, [key]: value }))
@@ -44,12 +51,12 @@ export function RepairUpdateForm({ mode, isSubmitting, onSubmit, resetSignal }: 
     event.preventDefault()
     setTouched(true)
 
-    const validationErrors = validateRepairUpdateForm(values)
+    const validationErrors = validateRepairUpdateForm(values, mode)
     setErrors(validationErrors)
 
     if (hasFormErrors(validationErrors) || isSubmitting) return
 
-    onSubmit(toRepairUpdatePayload(values) as RepairUpdatePayload)
+    onSubmit(toRepairUpdatePayload(values, mode) as RepairUpdatePayload | CloseFaultPayload)
   }
 
   const isMachineSetting = values.classification === 'Machine Setting'
@@ -173,6 +180,27 @@ export function RepairUpdateForm({ mode, isSubmitting, onSubmit, resetSignal }: 
             {touched && <FieldError message={errors.affectedProductsOrFormats} />}
           </label>
         </div>
+      )}
+
+      {mode === 'close' && (
+        <fieldset>
+          <legend>Could this fault have been prevented by planned maintenance? *</legend>
+          <div className="engineering-radio-group">
+            {MAINTENANCE_PREVENTABLE_OPTIONS.map((option) => (
+              <label key={option} className="engineering-radio">
+                <input
+                  type="radio"
+                  name="maintenance-preventable"
+                  value={option}
+                  checked={values.maintenancePreventable === option}
+                  onChange={() => setField('maintenancePreventable', option)}
+                />
+                {option}
+              </label>
+            ))}
+          </div>
+          {touched && <FieldError message={errors.maintenancePreventable} />}
+        </fieldset>
       )}
 
       <div className="engineering-form-actions">

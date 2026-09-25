@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import type { HmiConfigLine } from '../../../types/api'
 import { formatUkDateTime, resolveCurrentShift } from '../shift'
 import { StatusPill } from '../components/StatusPill'
-import type { ActiveRunRecord } from '../types'
+import type { LineStateStatus } from '../useLineStatePolling'
+import type { HmiLineState, StoredActiveRun } from '../types'
 
 export type HmiConfigState =
   | { status: 'loading' }
@@ -11,20 +12,39 @@ export type HmiConfigState =
 
 interface HomeScreenProps {
   configState: HmiConfigState
-  activeRun: ActiveRunRecord | null
+  lineState: LineStateStatus
+  activeRun: StoredActiveRun | null
+  isRestoring?: boolean
+  /** The line currently being opened, so only its own button is busy. */
+  openingLine?: string | null
   onRetry: () => void
+  onRetryLineState: () => void
   onStartRun: (lineName: string) => void
-  onResumeActiveRun: () => void
+  onOpenActiveRun: (runId: number, lineName: string) => void
   onEngineering: () => void
   onManagement: () => void
 }
 
+function activityLabel(line: HmiLineState) {
+  if (line.stale_status === 'stale') {
+    return line.stale_reason ?? 'No recent update.'
+  }
+  if (line.minutes_since_last_hourly_update === null) {
+    return 'No hourly update recorded yet.'
+  }
+  return `Last update ${line.minutes_since_last_hourly_update} min ago.`
+}
+
 export function HomeScreen({
   configState,
+  lineState,
   activeRun,
+  isRestoring = false,
+  openingLine = null,
   onRetry,
+  onRetryLineState,
   onStartRun,
-  onResumeActiveRun,
+  onOpenActiveRun,
   onEngineering,
   onManagement,
 }: HomeScreenProps) {
@@ -37,10 +57,14 @@ export function HomeScreen({
 
   const shift = resolveCurrentShift(now)
 
+  const stateByLine = new Map<string, HmiLineState>(
+    lineState.status === 'ready' ? lineState.lines.map((line) => [line.production_line, line]) : [],
+  )
+
   return (
     <div className="hmi-screen hmi-home">
       <header className="hmi-home__header">
-        <p className="hmi-home__brand">TonnageFlow Pulse</p>
+        <p className="hmi-home__brand">Tonnage Flow Pulse</p>
         <p className="hmi-home__clock">{formatUkDateTime(now)}</p>
         <p className="hmi-home__shift">Current shift: {shift.label}</p>
       </header>
@@ -61,6 +85,18 @@ export function HomeScreen({
           </div>
         )}
 
+        {configState.status === 'ready' && lineState.status === 'error' && (
+          <div className="hmi-home__status-message hmi-home__status-message--error" role="alert">
+            <p>
+              Line status is unavailable, so Pulse cannot confirm which lines are already
+              running. Do not start a run until this is working again.
+            </p>
+            <button type="button" onClick={onRetryLineState}>
+              Retry line status
+            </button>
+          </div>
+        )}
+
         {configState.status === 'ready' && configState.lines.length === 0 && (
           <p className="hmi-home__status-message">
             No production lines are configured yet. Ask a manager to add one.
@@ -70,21 +106,65 @@ export function HomeScreen({
         {configState.status === 'ready' && configState.lines.length > 0 && (
           <div className="hmi-home__line-grid">
             {configState.lines.map((line) => {
-              const isActiveHere = activeRun?.form.productionLine === line.name
+              const state = stateByLine.get(line.name)
+              const isKnown = lineState.status === 'ready' && state !== undefined
+              const isActive = isKnown && state.has_active_run
+              // What this device remembers starting - used only for
+              // wording, never to decide whether the line is free.
+              const startedHere = activeRun?.productionLine === line.name
+              const isOpening = openingLine === line.name
+
               return (
                 <article key={line.id} className="hmi-line-card">
                   <h2>{line.name}</h2>
-                  {isActiveHere ? (
-                    <StatusPill tone="blue">Active on this device</StatusPill>
-                  ) : (
-                    <StatusPill tone="green">Available</StatusPill>
+
+                  {lineState.status === 'loading' && (
+                    <StatusPill tone="grey">Checking status…</StatusPill>
                   )}
-                  {isActiveHere ? (
-                    <button type="button" onClick={onResumeActiveRun}>
-                      Resume Run
+
+                  {lineState.status === 'error' && (
+                    <StatusPill tone="grey">Status unavailable</StatusPill>
+                  )}
+
+                  {isKnown && !isActive && <StatusPill tone="green">Available</StatusPill>}
+
+                  {isActive && (
+                    <>
+                      <StatusPill tone="blue">Run Active</StatusPill>
+                      <p className="hmi-line-card__detail">
+                        {startedHere ? 'Started on this device.' : 'Started on another device.'}
+                      </p>
+                      <p className="hmi-line-card__detail">
+                        {state.line_technician} · {state.shift} · {state.customer} — {state.product}
+                      </p>
+                      {state.planned_downtime_active && (
+                        <StatusPill tone="amber">Planned downtime</StatusPill>
+                      )}
+                      {state.changeover_active && <StatusPill tone="amber">Changeover</StatusPill>}
+                      {state.engineering_fault_open && (
+                        <StatusPill tone="red">
+                          {state.open_fault_count === 1
+                            ? 'Engineering fault open'
+                            : `${state.open_fault_count} engineering faults open`}
+                        </StatusPill>
+                      )}
+                      {state.stale_status === 'stale' && (
+                        <StatusPill tone="amber">Needs an update</StatusPill>
+                      )}
+                      <p className="hmi-line-card__detail">{activityLabel(state)}</p>
+                    </>
+                  )}
+
+                  {isActive ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenActiveRun(state.run_id as number, line.name)}
+                      disabled={isRestoring || isOpening}
+                    >
+                      {isOpening ? 'Opening…' : 'Open Active Run'}
                     </button>
                   ) : (
-                    <button type="button" onClick={() => onStartRun(line.name)}>
+                    <button type="button" onClick={() => onStartRun(line.name)} disabled={!isKnown}>
                       Start Run
                     </button>
                   )}

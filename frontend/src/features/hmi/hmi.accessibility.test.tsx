@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HmiScreen } from './HmiScreen'
 import * as hmiApi from './api'
+import { availableLine, lineStateResponse } from './hmiTestState'
 
 vi.mock('./api')
 
@@ -14,6 +15,7 @@ afterEach(() => {
   // test file in a worker) and can intermittently wipe another file's
   // still-in-flight mock configuration during a full-suite run.
   vi.mocked(hmiApi.getHmiConfig).mockReset()
+  vi.mocked(hmiApi.getLineState).mockReset()
   window.localStorage.clear()
 })
 
@@ -39,6 +41,9 @@ describe('HMI accessibility and responsive foundations', () => {
     vi.mocked(hmiApi.getHmiConfig).mockResolvedValue({
       lines: [{ id: 1, name: 'Rovema', machines: [] }],
     })
+    vi.mocked(hmiApi.getLineState).mockResolvedValue(
+      lineStateResponse([availableLine({ line_id: 1, production_line: 'Rovema' })]),
+    )
 
     render(
       <MemoryRouter initialEntries={['/hmi']}>
@@ -60,6 +65,9 @@ describe('HMI accessibility and responsive foundations', () => {
     vi.mocked(hmiApi.getHmiConfig).mockResolvedValue({
       lines: [{ id: 1, name: 'Rovema', machines: [] }],
     })
+    vi.mocked(hmiApi.getLineState).mockResolvedValue(
+      lineStateResponse([availableLine({ line_id: 1, production_line: 'Rovema' })]),
+    )
 
     render(
       <MemoryRouter initialEntries={['/hmi']}>

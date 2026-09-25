@@ -395,6 +395,7 @@ describe('Engineering fault actions', () => {
     fireEvent.click(within(closeSection).getByRole('radio', { name: 'Mechanical' }))
     fireEvent.change(within(closeSection).getByLabelText(/finding/i), { target: { value: 'Fixed' } })
     fireEvent.change(within(closeSection).getByLabelText(/action taken/i), { target: { value: 'Replaced part' } })
+    fireEvent.click(within(closeSection).getByRole('radio', { name: 'No' }))
     fireEvent.click(within(closeSection).getByRole('button', { name: /close fault/i }))
 
     expect(screen.getByText(/this will mark engineering status and production status as resolved/i)).toBeInTheDocument()
@@ -417,7 +418,386 @@ describe('Engineering fault actions', () => {
       engineering_status: 'Resolved',
       production_status: 'Resolved',
       resolved_at: '2026-09-18T10:00:00+00:00',
+      maintenance_preventable: 'No',
     })
+
+    renderWorkspace()
+    await waitFor(() => expect(screen.getByText(/BV1 — Film Jam/)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/BV1 — Film Jam/))
+
+    const closeSection = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
+    fireEvent.click(within(closeSection).getByRole('radio', { name: 'Mechanical' }))
+    fireEvent.change(within(closeSection).getByLabelText(/finding/i), { target: { value: 'Fixed' } })
+    fireEvent.change(within(closeSection).getByLabelText(/action taken/i), { target: { value: 'Replaced part' } })
+    fireEvent.click(within(closeSection).getByRole('radio', { name: 'No' }))
+    fireEvent.click(within(closeSection).getByRole('button', { name: /close fault/i }))
+
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /close fault/i }))
+
+    await waitFor(() => expect(engineeringApi.closeFault).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(engineeringApi.getFaults).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(screen.getByRole('button', { name: /resolved jobs/i }))
+    await waitFor(() => expect(faultCards(/BV1 — Film Jam/)).toHaveLength(1))
+  })
+
+  // --- State after a successful close ---
+
+  const RESOLVED = acceptedByMe({
+    production_status: 'Resolved',
+    engineering_status: 'Resolved',
+    resolved_at: '2026-09-18T10:00:00+00:00',
+  })
+
+  function closeResponse() {
+    return {
+      status: 'success',
+      downtime_event_id: 1,
+      engineer: 'Alfie',
+      engineering_status: 'Resolved',
+      production_status: 'Resolved',
+      resolved_at: '2026-09-18T10:00:00+00:00',
+      maintenance_preventable: 'No' as const,
+    }
+  }
+
+  /** Only rendered fault CARDS - the success note names the same fault,
+   * so a bare text query would match it too. */
+  function faultCards(text: RegExp) {
+    return Array.from(document.querySelectorAll('.engineering-fault-card')).filter((card) =>
+      text.test(card.textContent ?? ''),
+    )
+  }
+
+  function fillAndSubmitClose() {
+    const section = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
+    fireEvent.click(within(section).getByRole('radio', { name: 'Mechanical' }))
+    fireEvent.change(within(section).getByLabelText(/finding/i), { target: { value: 'Fixed' } })
+    fireEvent.change(within(section).getByLabelText(/action taken/i), { target: { value: 'Replaced part' } })
+    fireEvent.click(within(section).getByRole('radio', { name: 'No' }))
+    fireEvent.click(within(section).getByRole('button', { name: /close fault/i }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /close fault/i }))
+  }
+
+  async function closeTheFault() {
+    renderWorkspace()
+    await waitFor(() => expect(screen.getByText(/BV1 — Film Jam/)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/BV1 — Film Jam/))
+    fillAndSubmitClose()
+    await waitFor(() => expect(engineeringApi.closeFault).toHaveBeenCalledTimes(1))
+  }
+
+  it('removes the closed fault from Open Production Faults', async () => {
+    vi.mocked(engineeringApi.getFaults)
+      .mockResolvedValueOnce({ items: [acceptedByMe()], total: 1 })
+      .mockResolvedValue({ items: [RESOLVED], total: 1 })
+    vi.mocked(engineeringApi.closeFault).mockResolvedValue(closeResponse())
+
+    await closeTheFault()
+    await waitFor(() => expect(engineeringApi.getFaults).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(screen.getByRole('button', { name: /open production faults/i }))
+    await waitFor(() =>
+      expect(screen.getByText(/no open production faults right now/i)).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/investigating/i)).not.toBeInTheDocument()
+  })
+
+  it('updates the Open, Mine and Resolved totals from the refreshed list', async () => {
+    vi.mocked(engineeringApi.getFaults)
+      .mockResolvedValueOnce({ items: [acceptedByMe()], total: 1 })
+      .mockResolvedValue({ items: [RESOLVED], total: 1 })
+    vi.mocked(engineeringApi.closeFault).mockResolvedValue(closeResponse())
+
+    renderWorkspace()
+    await waitFor(() => expect(screen.getByText('Open: 1')).toBeInTheDocument())
+    expect(screen.getByText('Mine: 1')).toBeInTheDocument()
+    expect(screen.getByText('Resolved: 0')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText(/BV1 — Film Jam/))
+    fillAndSubmitClose()
+
+    await waitFor(() => expect(screen.getByText('Open: 0')).toBeInTheDocument())
+    expect(screen.getByText('Mine: 0')).toBeInTheDocument()
+    expect(screen.getByText('Resolved: 1')).toBeInTheDocument()
+  })
+
+  it('shows the closed fault under Resolved Jobs without a further click', async () => {
+    vi.mocked(engineeringApi.getFaults)
+      .mockResolvedValueOnce({ items: [acceptedByMe()], total: 1 })
+      .mockResolvedValue({ items: [RESOLVED], total: 1 })
+    vi.mocked(engineeringApi.closeFault).mockResolvedValue(closeResponse())
+
+    await closeTheFault()
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /resolved jobs/i })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    )
+    await waitFor(() => expect(faultCards(/BV1 — Film Jam/)).toHaveLength(1))
+  })
+
+  it('shows an accessible success confirmation and dismisses the panel', async () => {
+    vi.mocked(engineeringApi.getFaults)
+      .mockResolvedValueOnce({ items: [acceptedByMe()], total: 1 })
+      .mockResolvedValue({ items: [RESOLVED], total: 1 })
+    vi.mocked(engineeringApi.closeFault).mockResolvedValue(closeResponse())
+
+    await closeTheFault()
+
+    const note = await screen.findByRole('status')
+    expect(note).toHaveTextContent(/fault closed/i)
+    expect(note).toHaveTextContent(/BV1 — Film Jam is now Resolved/)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('keeps the close honest when the follow-up refresh fails', async () => {
+    vi.mocked(engineeringApi.getFaults)
+      .mockResolvedValueOnce({ items: [acceptedByMe()], total: 1 })
+      .mockRejectedValue(new ApiRequestError(503, 'Engineering data is temporarily unavailable.'))
+    vi.mocked(engineeringApi.closeFault).mockResolvedValue(closeResponse())
+
+    await closeTheFault()
+
+    // The close succeeded and is still reported as such...
+    expect(await screen.findByRole('status')).toHaveTextContent(/fault closed/i)
+    // ...and the stale list is named as the problem, not the close.
+    expect(
+      await screen.findByText(/the fault was closed, but the list below could not be refreshed/i),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/could not close this fault/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps the fault open and the form filled when the close request fails', async () => {
+    vi.mocked(engineeringApi.getFaults).mockResolvedValue({ items: [acceptedByMe()], total: 1 })
+    vi.mocked(engineeringApi.closeFault).mockRejectedValue(
+      new ApiRequestError(503, 'Could not complete the request. Please try again.'),
+    )
+
+    await closeTheFault()
+
+    expect(await screen.findByText(/could not complete the request/i)).toBeInTheDocument()
+    expect(screen.queryByText(/fault closed/i)).not.toBeInTheDocument()
+
+    const section = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
+    expect(within(section).getByLabelText(/finding/i)).toHaveValue('Fixed')
+    expect(within(section).getByLabelText(/action taken/i)).toHaveValue('Replaced part')
+    expect(within(section).getByRole('radio', { name: 'No' })).toBeChecked()
+    expect(screen.getByText('Open: 1')).toBeInTheDocument()
+  })
+
+  it('does not duplicate the resolved entry when the close is replayed', async () => {
+    // A retry of the same idempotent action replays the original
+    // response; the authoritative read still returns exactly one row.
+    vi.mocked(engineeringApi.getFaults)
+      .mockResolvedValueOnce({ items: [acceptedByMe()], total: 1 })
+      .mockResolvedValue({ items: [RESOLVED], total: 1 })
+    vi.mocked(engineeringApi.closeFault).mockResolvedValue(closeResponse())
+
+    await closeTheFault()
+    await waitFor(() => expect(screen.getByText('Resolved: 1')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+
+    await waitFor(() => expect(engineeringApi.getFaults).toHaveBeenCalledTimes(3))
+    expect(screen.getByText('Resolved: 1')).toBeInTheDocument()
+    expect(faultCards(/BV1 — Film Jam/)).toHaveLength(1)
+  })
+
+  // --- Close Fault form completeness (backend CloseFaultRequest) ---
+
+  /** Every label the backend contract requires for a Machine Setting
+   * close (src/engineering_api.py: _SETTING_FIELD_NAMES). */
+  const SETTING_LABELS = [
+    /setting name/i,
+    /previous value/i,
+    /new value/i,
+    /reason for change/i,
+    /affected products or formats/i,
+  ]
+
+  async function openCloseSection() {
+    vi.mocked(engineeringApi.getFaults).mockResolvedValue({ items: [acceptedByMe()], total: 1 })
+    renderWorkspace()
+    await waitFor(() => expect(screen.getByText(/BV1 — Film Jam/)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/BV1 — Film Jam/))
+    return screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
+  }
+
+  it('shows only the Mechanical fields when Mechanical is selected', async () => {
+    const section = await openCloseSection()
+    fireEvent.click(within(section).getByRole('radio', { name: 'Mechanical' }))
+
+    expect(within(section).getByLabelText(/finding/i)).toBeInTheDocument()
+    expect(within(section).getByLabelText(/action taken/i)).toBeInTheDocument()
+    expect(within(section).getByLabelText(/notes \(optional\)/i)).toBeInTheDocument()
+    // The backend rejects a Mechanical update that carries setting fields.
+    for (const label of SETTING_LABELS) {
+      expect(within(section).queryByLabelText(label)).not.toBeInTheDocument()
+    }
+    // Preventability is asked for either classification.
+    expect(
+      within(section).getByText(/could this fault have been prevented by planned maintenance/i),
+    ).toBeInTheDocument()
+  })
+
+  it('shows every conditional field when Machine Setting is selected', async () => {
+    const section = await openCloseSection()
+    fireEvent.click(within(section).getByRole('radio', { name: 'Machine Setting' }))
+
+    for (const label of SETTING_LABELS) {
+      const field = within(section).getByLabelText(label)
+      expect(field).toBeInTheDocument()
+      expect(field).toBeVisible()
+    }
+    // ...and the preventability question is still there, below them.
+    expect(
+      within(section).getByText(/could this fault have been prevented by planned maintenance/i),
+    ).toBeInTheDocument()
+    for (const answer of ['Yes', 'No', 'Unsure']) {
+      expect(within(section).getByRole('radio', { name: answer })).toBeInTheDocument()
+    }
+  })
+
+  it.each([['Mechanical'], ['Machine Setting']])(
+    'requires the preventability answer for a %s close',
+    async (classification) => {
+      const section = await openCloseSection()
+      fireEvent.click(within(section).getByRole('radio', { name: classification }))
+      fireEvent.change(within(section).getByLabelText(/finding/i), { target: { value: 'Fixed' } })
+      fireEvent.change(within(section).getByLabelText(/action taken/i), { target: { value: 'Done' } })
+
+      if (classification === 'Machine Setting') {
+        fireEvent.change(within(section).getByLabelText(/setting name/i), { target: { value: 'Sealer' } })
+        fireEvent.change(within(section).getByLabelText(/previous value/i), { target: { value: '185C' } })
+        fireEvent.change(within(section).getByLabelText(/new value/i), { target: { value: '192C' } })
+        fireEvent.change(within(section).getByLabelText(/reason for change/i), { target: { value: 'Seal' } })
+        fireEvent.change(within(section).getByLabelText(/affected products or formats/i), {
+          target: { value: '1kg' },
+        })
+      }
+
+      fireEvent.click(within(section).getByRole('button', { name: /close fault/i }))
+
+      expect(
+        within(section).getByText(/answer whether planned maintenance could have prevented/i),
+      ).toBeInTheDocument()
+      expect(engineeringApi.closeFault).not.toHaveBeenCalled()
+    },
+  )
+
+  it('blocks submission with accessible validation when setting fields are missing', async () => {
+    const section = await openCloseSection()
+    fireEvent.click(within(section).getByRole('radio', { name: 'Machine Setting' }))
+    fireEvent.change(within(section).getByLabelText(/finding/i), { target: { value: 'Fixed' } })
+    fireEvent.change(within(section).getByLabelText(/action taken/i), { target: { value: 'Done' } })
+    fireEvent.click(within(section).getByRole('radio', { name: 'No' }))
+    // Every setting field deliberately left blank.
+    fireEvent.click(within(section).getByRole('button', { name: /close fault/i }))
+
+    const messages = within(section).getAllByRole('alert').map((a) => a.textContent ?? '')
+    expect(messages.some((m) => /setting name is required/i.test(m))).toBe(true)
+    expect(messages.some((m) => /previous value is required/i.test(m))).toBe(true)
+    expect(messages.some((m) => /new value is required/i.test(m))).toBe(true)
+    expect(messages.some((m) => /reason for change is required/i.test(m))).toBe(true)
+    expect(messages.some((m) => /affected products or formats is required/i.test(m))).toBe(true)
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(engineeringApi.closeFault).not.toHaveBeenCalled()
+  })
+
+  it('submits every contract field for a Machine Setting close', async () => {
+    vi.mocked(engineeringApi.getFaults).mockResolvedValue({ items: [acceptedByMe()], total: 1 })
+    vi.mocked(engineeringApi.closeFault).mockResolvedValue(closeResponse())
+
+    renderWorkspace()
+    await waitFor(() => expect(screen.getByText(/BV1 — Film Jam/)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/BV1 — Film Jam/))
+
+    const section = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
+    fireEvent.click(within(section).getByRole('radio', { name: 'Machine Setting' }))
+    fireEvent.change(within(section).getByLabelText(/finding/i), { target: { value: 'Seal drifted' } })
+    fireEvent.change(within(section).getByLabelText(/action taken/i), { target: { value: 'Raised set point' } })
+    fireEvent.change(within(section).getByLabelText(/setting name/i), { target: { value: 'Sealer temperature' } })
+    fireEvent.change(within(section).getByLabelText(/previous value/i), { target: { value: '185C' } })
+    fireEvent.change(within(section).getByLabelText(/new value/i), { target: { value: '192C' } })
+    fireEvent.change(within(section).getByLabelText(/reason for change/i), { target: { value: 'Seal integrity' } })
+    fireEvent.change(within(section).getByLabelText(/affected products or formats/i), {
+      target: { value: '1 kg Pillow' },
+    })
+    fireEvent.click(within(section).getByRole('radio', { name: 'Unsure' }))
+    fireEvent.click(within(section).getByRole('button', { name: /close fault/i }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /close fault/i }))
+
+    await waitFor(() => expect(engineeringApi.closeFault).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(engineeringApi.closeFault).mock.calls[0][2]).toEqual({
+      classification: 'Machine Setting',
+      finding: 'Seal drifted',
+      action: 'Raised set point',
+      notes: null,
+      setting_name: 'Sealer temperature',
+      previous_value: '185C',
+      new_value: '192C',
+      reason_for_change: 'Seal integrity',
+      affected_products_or_formats: '1 kg Pillow',
+      maintenance_preventable: 'Unsure',
+    })
+  })
+
+  it('omits the Machine Setting fields entirely from a Mechanical close', async () => {
+    vi.mocked(engineeringApi.getFaults).mockResolvedValue({ items: [acceptedByMe()], total: 1 })
+    vi.mocked(engineeringApi.closeFault).mockResolvedValue(closeResponse())
+
+    renderWorkspace()
+    await waitFor(() => expect(screen.getByText(/BV1 — Film Jam/)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/BV1 — Film Jam/))
+
+    const section = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
+    fireEvent.click(within(section).getByRole('radio', { name: 'Mechanical' }))
+    fireEvent.change(within(section).getByLabelText(/finding/i), { target: { value: 'Worn roller' } })
+    fireEvent.change(within(section).getByLabelText(/action taken/i), { target: { value: 'Replaced' } })
+    fireEvent.click(within(section).getByRole('radio', { name: 'Yes' }))
+    fireEvent.click(within(section).getByRole('button', { name: /close fault/i }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /close fault/i }))
+
+    await waitFor(() => expect(engineeringApi.closeFault).toHaveBeenCalledTimes(1))
+    const payload = vi.mocked(engineeringApi.closeFault).mock.calls[0][2]
+    // The backend rejects a Mechanical update carrying setting fields,
+    // so they must be absent - not blank strings.
+    for (const key of [
+      'setting_name', 'previous_value', 'new_value',
+      'reason_for_change', 'affected_products_or_formats',
+    ]) {
+      expect(payload).not.toHaveProperty(key)
+    }
+    expect(payload.maintenance_preventable).toBe('Yes')
+  })
+
+  // --- Maintenance preventability (Stage 6B2) ---
+
+  it('asks the preventability question only when closing, with no preselected answer', async () => {
+    vi.mocked(engineeringApi.getFaults).mockResolvedValue({ items: [acceptedByMe()], total: 1 })
+
+    renderWorkspace()
+    await waitFor(() => expect(screen.getByText(/BV1 — Film Jam/)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/BV1 — Film Jam/))
+
+    const closeSection = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
+    expect(
+      within(closeSection).getByText(/could this fault have been prevented by planned maintenance/i),
+    ).toBeInTheDocument()
+    for (const option of ['Yes', 'No', 'Unsure']) {
+      expect(within(closeSection).getByRole('radio', { name: option })).not.toBeChecked()
+    }
+
+    // The interim repair-update form must not ask it - only /close takes it.
+    const updateSection = screen.getByRole('heading', { name: 'Add Repair Update' }).closest('section') as HTMLElement
+    expect(within(updateSection).queryByText(/prevented by planned maintenance/i)).not.toBeInTheDocument()
+  })
+
+  it('blocks the close until the preventability question is answered', async () => {
+    vi.mocked(engineeringApi.getFaults).mockResolvedValue({ items: [acceptedByMe()], total: 1 })
 
     renderWorkspace()
     await waitFor(() => expect(screen.getByText(/BV1 — Film Jam/)).toBeInTheDocument())
@@ -429,13 +809,85 @@ describe('Engineering fault actions', () => {
     fireEvent.change(within(closeSection).getByLabelText(/action taken/i), { target: { value: 'Replaced part' } })
     fireEvent.click(within(closeSection).getByRole('button', { name: /close fault/i }))
 
+    expect(
+      within(closeSection).getByText(/answer whether planned maintenance could have prevented/i),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(engineeringApi.closeFault).not.toHaveBeenCalled()
+  })
+
+  it.each(['Yes', 'No', 'Unsure'] as const)(
+    'sends "%s" with the close request, alongside the Machine Setting detail',
+    async (answer) => {
+      vi.mocked(engineeringApi.getFaults).mockResolvedValue({ items: [acceptedByMe()], total: 1 })
+      vi.mocked(engineeringApi.closeFault).mockResolvedValue({
+        status: 'success',
+        downtime_event_id: 1,
+        engineer: 'Alfie',
+        engineering_status: 'Resolved',
+        production_status: 'Resolved',
+        resolved_at: '2026-09-18T10:00:00+00:00',
+        maintenance_preventable: answer,
+      })
+
+      renderWorkspace()
+      await waitFor(() => expect(screen.getByText(/BV1 — Film Jam/)).toBeInTheDocument())
+      fireEvent.click(screen.getByText(/BV1 — Film Jam/))
+
+      const closeSection = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
+      fireEvent.click(within(closeSection).getByRole('radio', { name: 'Machine Setting' }))
+      fireEvent.change(within(closeSection).getByLabelText(/finding/i), { target: { value: 'Seal failing' } })
+      fireEvent.change(within(closeSection).getByLabelText(/action taken/i), { target: { value: 'Raised temperature' } })
+      fireEvent.change(within(closeSection).getByLabelText(/setting name/i), { target: { value: 'Sealer temperature' } })
+      fireEvent.change(within(closeSection).getByLabelText(/previous value/i), { target: { value: '185C' } })
+      fireEvent.change(within(closeSection).getByLabelText(/new value/i), { target: { value: '192C' } })
+      fireEvent.change(within(closeSection).getByLabelText(/reason for change/i), { target: { value: 'Seal integrity' } })
+      fireEvent.change(within(closeSection).getByLabelText(/affected products or formats/i), {
+        target: { value: '1kg Pillow' },
+      })
+      fireEvent.click(within(closeSection).getByRole('radio', { name: answer }))
+      fireEvent.click(within(closeSection).getByRole('button', { name: /close fault/i }))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /close fault/i }))
+
+      await waitFor(() => expect(engineeringApi.closeFault).toHaveBeenCalledTimes(1))
+      expect(vi.mocked(engineeringApi.closeFault).mock.calls[0][2]).toMatchObject({
+        maintenance_preventable: answer,
+        classification: 'Machine Setting',
+        finding: 'Seal failing',
+        action: 'Raised temperature',
+        setting_name: 'Sealer temperature',
+        previous_value: '185C',
+        new_value: '192C',
+        reason_for_change: 'Seal integrity',
+        affected_products_or_formats: '1kg Pillow',
+      })
+    },
+  )
+
+  it('keeps the answer and the repair detail after a failed close', async () => {
+    vi.mocked(engineeringApi.getFaults).mockResolvedValue({ items: [acceptedByMe()], total: 1 })
+    vi.mocked(engineeringApi.closeFault).mockRejectedValue(
+      new ApiRequestError(503, 'Could not complete the request. Please try again.'),
+    )
+
+    renderWorkspace()
+    await waitFor(() => expect(screen.getByText(/BV1 — Film Jam/)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/BV1 — Film Jam/))
+
+    const closeSection = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
+    fireEvent.click(within(closeSection).getByRole('radio', { name: 'Mechanical' }))
+    fireEvent.change(within(closeSection).getByLabelText(/finding/i), { target: { value: 'Fixed' } })
+    fireEvent.change(within(closeSection).getByLabelText(/action taken/i), { target: { value: 'Replaced part' } })
+    fireEvent.click(within(closeSection).getByRole('radio', { name: 'Unsure' }))
+    fireEvent.click(within(closeSection).getByRole('button', { name: /close fault/i }))
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /close fault/i }))
 
-    await waitFor(() => expect(engineeringApi.closeFault).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(engineeringApi.getFaults).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByText(/could not complete the request/i)).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: /resolved jobs/i }))
-    await waitFor(() => expect(screen.getByText(/BV1 — Film Jam/)).toBeInTheDocument())
+    const section = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
+    expect(within(section).getByLabelText(/finding/i)).toHaveValue('Fixed')
+    expect(within(section).getByLabelText(/action taken/i)).toHaveValue('Replaced part')
+    expect(within(section).getByRole('radio', { name: 'Unsure' })).toBeChecked()
   })
 
   it('shows a clear conflict message when closing an already-resolved fault', async () => {
@@ -452,6 +904,7 @@ describe('Engineering fault actions', () => {
     fireEvent.click(within(closeSection).getByRole('radio', { name: 'Mechanical' }))
     fireEvent.change(within(closeSection).getByLabelText(/finding/i), { target: { value: 'Fixed' } })
     fireEvent.change(within(closeSection).getByLabelText(/action taken/i), { target: { value: 'Replaced part' } })
+    fireEvent.click(within(closeSection).getByRole('radio', { name: 'No' }))
     fireEvent.click(within(closeSection).getByRole('button', { name: /close fault/i }))
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /close fault/i }))
 
@@ -823,6 +1276,7 @@ describe('Hand Over Job', () => {
     fireEvent.click(within(closeSection).getByRole('radio', { name: 'Mechanical' }))
     fireEvent.change(within(closeSection).getByLabelText(/finding/i), { target: { value: 'Fixed' } })
     fireEvent.change(within(closeSection).getByLabelText(/action taken/i), { target: { value: 'Replaced part' } })
+    fireEvent.click(within(closeSection).getByRole('radio', { name: 'No' }))
     fireEvent.click(within(closeSection).getByRole('button', { name: /close fault/i }))
     expect(screen.getAllByRole('alertdialog')).toHaveLength(1)
 

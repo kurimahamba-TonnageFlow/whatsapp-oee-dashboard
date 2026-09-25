@@ -1,48 +1,10 @@
-import type { ActiveRunRecord } from './types'
-
-export interface RunProgress {
-  totalPalletsCompleted: number
-  palletsRemaining: number
-  percentComplete: number
-  elapsedMinutes: number
-  expectedPacks: number
-  actualPacks: number
-  outputGapPacks: number
-}
-
-/** Derives live progress figures from the run's starting configuration
- * plus what's been recorded since (hourly-update totals - currently
- * fixture-backed, see awaitingApiIntegration.ts). Expected output uses
- * the same target_speed_ppm-based formula documented in
- * docs/dashboard_integration.md, applied to elapsed real time. */
-export function deriveRunProgress(run: ActiveRunRecord, now: Date = new Date()): RunProgress {
-  const initialPalletsRemaining = Number(run.form.palletsRemaining) || 0
-  const casesPerPallet = Number(run.form.casesPerPallet) || 0
-  const packsPerCase = Number(run.form.packsPerCase) || 0
-  const targetSpeedPpm = Number(run.form.targetSpeedPpm) || 0
-
-  const palletsRemaining = Math.max(initialPalletsRemaining - run.totalPalletsCompleted, 0)
-  const totalPlanned = run.totalPalletsCompleted + palletsRemaining
-  const percentComplete = totalPlanned > 0 ? (run.totalPalletsCompleted / totalPlanned) * 100 : 0
-
-  const elapsedMinutes = Math.max(
-    (now.getTime() - new Date(run.startedAtIso).getTime()) / 60000,
-    0,
-  )
-
-  const expectedPacks = targetSpeedPpm * elapsedMinutes
-  const actualPacks = run.totalPalletsCompleted * casesPerPallet * packsPerCase
-
-  return {
-    totalPalletsCompleted: run.totalPalletsCompleted,
-    palletsRemaining,
-    percentComplete,
-    elapsedMinutes,
-    expectedPacks,
-    actualPacks,
-    outputGapPacks: Math.max(expectedPacks - actualPacks, 0),
-  }
-}
+/**
+ * Display helpers only. Every production figure (expected output,
+ * actual output, gap, achievement, downtime minutes) is calculated by
+ * the backend and read from GET /api/v1/runs/{id}/hmi-state - this file
+ * must never recreate a manufacturing calculation.
+ */
+import type { StatusTone } from './components/StatusPill'
 
 export function formatDuration(totalMinutes: number): string {
   const minutes = Math.max(Math.floor(totalMinutes), 0)
@@ -51,13 +13,12 @@ export function formatDuration(totalMinutes: number): string {
   return `${hours}h ${remainder}m`
 }
 
-/** Simple, documented default thresholds - adjustable later, not a
- * claim of precise business rules. */
-export function statusToneForProgress(
-  percentComplete: number,
-  outputGapPacks: number,
-): 'green' | 'amber' | 'red' {
-  if (outputGapPacks === 0) return 'green'
-  if (percentComplete >= 50) return 'amber'
+/** Mirrors the backend's line attention thresholds (see
+ * docs/dashboard_integration.md): 95%+ on target, 85-95% at risk,
+ * below 85% behind, no achievement figure yet = neutral. */
+export function statusToneForAchievement(achievementPercent: number | null): StatusTone {
+  if (achievementPercent === null) return 'blue'
+  if (achievementPercent >= 95) return 'green'
+  if (achievementPercent >= 85) return 'amber'
   return 'red'
 }

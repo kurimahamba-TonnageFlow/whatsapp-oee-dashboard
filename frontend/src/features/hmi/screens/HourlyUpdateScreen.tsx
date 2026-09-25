@@ -1,21 +1,21 @@
 import { useEffect, useState } from 'react'
-import type { HourlyUpdateResult } from '../awaitingApiIntegration'
-import type { ActiveRunRecord } from '../types'
+import { validatePalletsInput } from '../validation'
+import type { HourlyUpdateResponse, RunState } from '../types'
 
 interface HourlyUpdateScreenProps {
-  run: ActiveRunRecord
+  state: RunState
   isSubmitting: boolean
-  result: HourlyUpdateResult | null
+  result: HourlyUpdateResponse | null
   errorMessage: string | null
   onCancel: () => void
-  onSubmit: (palletsProducedThisPeriod: number) => void
+  onSubmit: (palletsProduced: string) => void
   onDone: () => void
 }
 
 const AUTO_RETURN_MS = 1600
 
 export function HourlyUpdateScreen({
-  run,
+  state,
   isSubmitting,
   result,
   errorMessage,
@@ -38,32 +38,32 @@ export function HourlyUpdateScreen({
         <p className="hmi-run-started__mark">✓ Update recorded</p>
         <dl className="hmi-review-list">
           <div className="hmi-review-list__row">
-            <dt>Previous total</dt>
-            <dd>{result.previousTotal} pallets</dd>
+            <dt>Pallets produced this period</dt>
+            <dd>{result.pallets_produced}</dd>
           </div>
           <div className="hmi-review-list__row">
             <dt>New total</dt>
-            <dd>{result.newTotal} pallets</dd>
-          </div>
-          <div className="hmi-review-list__row">
-            <dt>Pallets produced this period</dt>
-            <dd>{result.palletsProducedThisPeriod}</dd>
+            <dd>{result.total_pallets_completed} pallets</dd>
           </div>
           <div className="hmi-review-list__row">
             <dt>Updated pallets remaining</dt>
-            <dd>{result.palletsRemaining}</dd>
+            <dd>{result.pallets_remaining}</dd>
+          </div>
+          <div className="hmi-review-list__row">
+            <dt>Period</dt>
+            <dd>{result.period_minutes} min</dd>
           </div>
           <div className="hmi-review-list__row">
             <dt>Expected output</dt>
-            <dd>{Math.round(result.expectedPacksThisPeriod)} packs</dd>
+            <dd>{Math.round(result.expected_packs)} packs</dd>
           </div>
           <div className="hmi-review-list__row">
             <dt>Actual output</dt>
-            <dd>{Math.round(result.actualPacksThisPeriod)} packs</dd>
+            <dd>{Math.round(result.actual_packs)} packs</dd>
           </div>
           <div className="hmi-review-list__row">
-            <dt>Updated output gap</dt>
-            <dd>{Math.round(result.outputGapPacks)} packs</dd>
+            <dt>Output gap</dt>
+            <dd>{Math.round(result.output_gap_packs)} packs</dd>
           </div>
         </dl>
       </div>
@@ -71,37 +71,39 @@ export function HourlyUpdateScreen({
   }
 
   function handleSubmit() {
-    const value = Number(palletsProduced)
-    if (palletsProduced.trim() === '' || !Number.isFinite(value) || value < 0) {
-      setValidationError('Enter a number of pallets, 0 or more.')
+    const error = validatePalletsInput(palletsProduced)
+    if (error) {
+      setValidationError(error)
       return
     }
     setValidationError(null)
-    onSubmit(value)
+    onSubmit(palletsProduced.trim())
   }
 
   return (
     <div className="hmi-screen hmi-hourly-update">
-      <h1>Hourly Update — {run.form.productionLine}</h1>
+      <h1>Hourly Update — {state.run.production_line}</h1>
 
       <dl className="hmi-review-list">
         <div className="hmi-review-list__row">
           <dt>Previous total</dt>
-          <dd>{run.totalPalletsCompleted} pallets</dd>
+          <dd>{state.run.total_pallets_completed} pallets</dd>
         </div>
       </dl>
 
       <label className="hmi-field">
         Pallets produced this period
         <input
-          type="number"
-          inputMode="numeric"
-          min={0}
-          step="1"
+          type="text"
+          inputMode="decimal"
           value={palletsProduced}
           onChange={(e) => setPalletsProduced(e.target.value)}
           disabled={isSubmitting}
+          aria-describedby="hmi-hourly-help"
         />
+        <span id="hmi-hourly-help" className="hmi-field-help">
+          Whole or part pallets, for example 3.75. Enter 0 if nothing was produced.
+        </span>
         {validationError && (
           <span className="hmi-field-error" role="alert">
             {validationError}

@@ -36,7 +36,7 @@ describe('AppRoutes', () => {
 
     // Appears once in AppShell's shared header and once in the HMI's
     // own home-screen brand line.
-    expect(screen.getAllByText('TonnageFlow Pulse')).toHaveLength(2)
+    expect(screen.getAllByText('Tonnage Flow Pulse')).toHaveLength(2)
     expect(
       screen.getByRole('heading', { name: /select a production line/i }),
     ).toBeInTheDocument()

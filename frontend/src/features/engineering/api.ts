@@ -5,6 +5,7 @@
  */
 import { apiClient } from '../../api/client'
 import type {
+  CloseFaultPayload,
   EngineeringAcceptResponse,
   EngineeringCloseResponse,
   EngineeringFaultsResponse,
@@ -58,11 +59,12 @@ export function addRepairUpdate(
   )
 }
 
-/** POST /api/v1/engineering/faults/{id}/close - same body shape as addRepairUpdate. */
+/** POST /api/v1/engineering/faults/{id}/close - the repair-update body
+ * plus the required maintenance-preventability answer. */
 export function closeFault(
   token: string,
   downtimeEventId: number,
-  payload: RepairUpdatePayload,
+  payload: CloseFaultPayload,
   signal?: AbortSignal,
 ) {
   return apiClient.post<EngineeringCloseResponse>(

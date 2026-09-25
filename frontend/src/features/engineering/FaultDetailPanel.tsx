@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ConfirmDialog } from './ConfirmDialog'
 import { HandoverForm } from './HandoverForm'
 import { RepairUpdateForm } from './RepairUpdateForm'
 import { HANDOVER_ACTION_TEXT, canHandOverFault, engineeringStatusLabel } from './constants'
 import { formatDuration, formatTimestamp } from './format'
-import type { EngineeringFault, RepairUpdatePayload } from './types'
+import type { CloseFaultPayload, EngineeringFault, RepairUpdatePayload } from './types'
 
 interface FaultDetailPanelProps {
   fault: EngineeringFault
@@ -19,7 +19,7 @@ interface FaultDetailPanelProps {
   onSubmitUpdate: (payload: RepairUpdatePayload) => void
   isSubmittingClose: boolean
   closeError: string | null
-  onConfirmClose: (payload: RepairUpdatePayload) => void
+  onConfirmClose: (payload: CloseFaultPayload) => void
   isSubmittingHandover: boolean
   handoverError: string | null
   onConfirmHandover: (note: string) => void
@@ -29,7 +29,7 @@ interface FaultDetailPanelProps {
  * once - a tagged union (rather than two separate useState calls)
  * makes that structurally impossible, so their two ConfirmDialogs can
  * never both render at the same time. */
-type PendingAction = { type: 'close'; payload: RepairUpdatePayload } | { type: 'handover'; note: string } | null
+type PendingAction = { type: 'close'; payload: CloseFaultPayload } | { type: 'handover'; note: string } | null
 
 export function FaultDetailPanel({
   fault,
@@ -51,6 +51,64 @@ export function FaultDetailPanel({
 }: FaultDetailPanelProps) {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [isHandoverFormOpen, setIsHandoverFormOpen] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  // While the panel is open the page behind it must not scroll, and
+  // focus must stay inside. Escape closes it only when no confirmation
+  // is pending - a half-answered "are you sure?" should be dismissed
+  // first, by its own dialog.
+  const isConfirming = pendingAction !== null
+
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null
+    const { overflow } = document.body.style
+    document.body.style.overflow = 'hidden'
+
+    panelRef.current?.focus()
+
+    return () => {
+      document.body.style.overflow = overflow
+      // Return focus to whatever opened the panel, if it still exists.
+      if (opener && document.contains(opener)) opener.focus()
+    }
+  }, [])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !isConfirming) {
+        event.stopPropagation()
+        onClose()
+        return
+      }
+
+      if (event.key !== 'Tab') return
+
+      const panel = panelRef.current
+      if (!panel) return
+
+      const focusable = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null)
+
+      if (focusable.length === 0) return
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isConfirming, onClose])
 
   const isOpen = fault.production_status === 'Ongoing'
   const isMine = fault.engineer === currentEngineer
@@ -64,7 +122,11 @@ export function FaultDetailPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby="engineering-detail-title"
+        ref={panelRef}
+        tabIndex={-1}
       >
+        {/* Stays put while the body scrolls, so the engineer can always
+            see which fault they are working on and how to get out. */}
         <div className="engineering-detail-panel__header">
           <h2 id="engineering-detail-title">
             {fault.machine} — {fault.reason}
@@ -74,6 +136,7 @@ export function FaultDetailPanel({
           </button>
         </div>
 
+        <div className="engineering-detail-panel__body">
         <dl className="engineering-detail-panel__summary">
           <div>
             <dt>Production line</dt>
@@ -249,11 +312,14 @@ export function FaultDetailPanel({
               <RepairUpdateForm
                 mode="close"
                 isSubmitting={isSubmittingClose}
-                onSubmit={(payload) => setPendingAction({ type: 'close', payload })}
+                onSubmit={(payload) =>
+                  setPendingAction({ type: 'close', payload: payload as CloseFaultPayload })
+                }
               />
             </section>
           </>
         )}
+        </div>
       </div>
 
       {pendingAction?.type === 'close' && (
