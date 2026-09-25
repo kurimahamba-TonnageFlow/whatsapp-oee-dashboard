@@ -191,10 +191,33 @@ or, for a Machine Setting change:
 ```
 POST /api/v1/engineering/faults/{downtime_event_id}/close
 ```
-**Same request body shape as `/updates` above** - closing requires the
-final repair classification, finding and action (and full Machine
-Setting fields if applicable) in the same call that resolves the
-fault.
+**Same request body shape as `/updates` above, plus one required
+field** - closing requires the final repair classification, finding
+and action (and full Machine Setting fields if applicable) in the same
+call that resolves the fault, and the answer to "Could this fault have
+been prevented by planned maintenance?":
+
+```json
+{"classification": "Mechanical", "finding": "...", "action": "...", "maintenance_preventable": "Yes"}
+```
+
+`maintenance_preventable` must be exactly `"Yes"`, `"No"` or `"Unsure"`;
+missing or any other value is a `422` and nothing is written. It is
+stored on `downtime_events.maintenance_preventable` in the same guarded
+UPDATE that resolves the fault, and is never inferred from notes.
+Interim `/updates` calls do not ask it.
+
+The Engineering screen asks it as a three-option radio group on the
+Close Fault form only
+(`frontend/src/features/engineering/RepairUpdateForm.tsx`, `mode="close"`).
+No option is preselected, and the form blocks the close until one is
+chosen, so a stored answer is always a deliberate one. A failed close
+keeps the answer and the typed repair detail on screen for the retry.
+
+**Release note:** this endpoint needs
+`migrations/0003_pulse_phase1_foundation.sql` applied. That migration was
+applied successfully during Stage 6B4. The backend and the frontend must
+still be deployed together.
 
 - `404` - fault does not exist.
 - `409` - already resolved (by this engineer's own earlier close, or a
@@ -206,7 +229,7 @@ fault.
   for exactly how.
 
 ```json
-{"status": "success", "downtime_event_id": 12, "engineer": "Alfie", "engineering_status": "Resolved", "production_status": "Resolved", "resolved_at": "2026-09-17T15:10:00+00:00"}
+{"status": "success", "downtime_event_id": 12, "engineer": "Alfie", "engineering_status": "Resolved", "production_status": "Resolved", "resolved_at": "2026-09-17T15:10:00+00:00", "maintenance_preventable": "Yes"}
 ```
 
 ## CORS / environment

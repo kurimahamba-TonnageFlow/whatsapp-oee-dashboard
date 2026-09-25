@@ -1,63 +1,94 @@
-# Operator HMI — What's Live vs. Fixture-Backed
+# Operator HMI — Frontend Status
 
-Stage 4 status. Read this before touching `src/features/hmi/`.
+Stage 6B2 status. Read this before touching `src/features/hmi/`.
+
+Every Stage 6B1 capture endpoint the HMI now calls needs
+`migrations/0003_pulse_phase1_foundation.sql`, which was **applied
+successfully during Stage 6B4**. The backend and this frontend must be
+released together.
 
 ## Live (real backend calls, confirmed contracts)
 
-- `GET /health` — API status indicator (`src/components/ApiStatus.tsx`).
-- `GET /api/v1/hmi/config` — Home screen's line list, and the Report to
-  Engineer screen's machine/fault-button options.
-- `POST /api/v1/runs` — Start Run submission.
-- `POST /api/v1/runs/{run_id}/complete` — Complete Run.
+Every HMI workflow is backed by a real endpoint. No fixtures remain:
+`src/features/hmi/awaitingApiIntegration.ts` has been deleted, and every
+call goes through `src/features/hmi/api.ts`.
 
-All four are called from `src/features/hmi/api.ts` only.
+| Workflow | Endpoint |
+| --- | --- |
+| API status indicator (`src/components/ApiStatus.tsx`) | `GET /health` |
+| Home line list, Report to Engineer machine/button options | `GET /api/v1/hmi/config` |
+| Home cross-device line availability | `GET /api/v1/hmi/lines` |
+| Start Run | `POST /api/v1/runs` |
+| Active-run recovery | `GET /api/v1/runs/{run_id}/hmi-state` |
+| Hourly Update | `POST /api/v1/runs/{run_id}/hourly-updates` |
+| Planned Downtime start / end | `POST /api/v1/runs/{run_id}/planned-downtime`, `POST /api/v1/planned-downtime/{id}/end` |
+| Report to Engineer | `POST /api/v1/runs/{run_id}/faults` |
+| Start / Complete Changeover | `POST /api/v1/runs/{run_id}/changeovers`, `POST /api/v1/changeovers/{id}/complete` |
+| Complete Run review | `POST /api/v1/runs/{run_id}/completion-preview` |
+| Complete Run | `POST /api/v1/runs/{run_id}/complete` |
 
-## Fixture-backed, awaiting API integration
+No figure shown on the tablet is calculated in the browser. Every total,
+percentage, expected-output and waste figure comes from the backend
+response (`src/pulse_calculations.py`); the HMI formats and displays it.
 
-No backend endpoint exists yet for these three workflows. They are
-fully built and tested behind a typed service interface
-(`src/features/hmi/awaitingApiIntegration.ts`), using local, clearly
-labelled fixtures (`local-fixture-*` demonstration IDs) — **nothing
-here ever reaches Supabase**:
+## Idempotent writes
 
-- **Hourly Update** (`submitHourlyUpdate`) — computes previous/new
-  total, updated pallets remaining, expected/actual output and output
-  gap locally, using the same formulas documented in
-  `docs/dashboard_integration.md`.
-- **Planned Downtime** (`startPlannedDowntime` / `endPlannedDowntime`)
-  — tracked in this device's local state only for the duration of the
-  session.
-- **Report to Engineer** (`reportFaultToEngineer`) — returns a demo
-  reference, never sent anywhere.
+Every write sends an `Idempotency-Key` header
+(`src/features/hmi/idempotency.ts`). The key is generated when the
+operator commits an action and reused for every retry of that same
+action, so a double tap, a lost response or a refresh mid-request cannot
+produce a second hourly update, fault, changeover or run completion. The
+guarantee is enforced server-side by the `hmi_idempotency_keys` table, in
+one transaction with the business rows — not by a client-side timer, and
+not by the previous five-minute duplicate guard, which has been removed.
 
-When a real endpoint exists for any of these, replace only the
-function body in `awaitingApiIntegration.ts` — every call site in
-`HmiScreen.tsx` already matches the shape a real API call would need.
+Keys are retained for 90 days, with `created_at` and `expires_at` set by
+database defaults rather than by the client. An expired key may be reused
+as a new action; a live key never can. Removing expired rows is a
+separate maintenance call (`delete_expired_idempotency_keys`), never part
+of a write — see `docs/hmi_integration.md`.
 
-## This-device run tracking (real, not a fixture)
+## Cross-device line state
 
-There is no live "is this line active" or "get this run's details"
-endpoint the public HMI can call (only the PIN-protected Management
-API has one, and this stage deliberately does not use it - see
-`docs/hmi_integration.md`). `src/features/hmi/activeRunStorage.ts`
-persists the run this device started (from a real, API-confirmed
-`POST /api/v1/runs` response) in `localStorage`, so a page refresh
-restores the Active Run screen instead of losing track of it or
-falsely showing a completed action. It does not know about runs
-started on other tablets - the real cross-device guard remains the
-`409` response from `POST /api/v1/runs`.
+Home no longer decides availability from this device's storage. It polls
+`GET /api/v1/hmi/lines` every 20 seconds
+(`src/features/hmi/useLineStatePolling.ts`), pausing while the tab is
+hidden, refreshing immediately when it becomes visible again, and keeping
+at most one request in flight.
 
-## What remains for the API-integration stage
+- A line running on **any** tablet shows **Run Active** with the
+  technician, shift, customer and product, plus whether planned
+  downtime, a changeover or an engineering fault is open, and whether the
+  run has gone quiet (75-minute threshold).
+- An active line offers **Open Active Run**, never Start Run. Opening it
+  reads the full state from `GET /api/v1/runs/{run_id}/hmi-state` and
+  only then adopts the run on this device.
+- If line status cannot be loaded, Home says so and **disables Start
+  Run**. An empty `localStorage` is never taken as proof that a line is
+  free.
+- The database uniqueness constraint stays the final authority. If two
+  tablets still race, the loser's `409` from `POST /api/v1/runs`
+  re-reads the line state and explains that another device started the
+  run first; nothing is retried automatically and no second run is
+  created.
 
-- Replace the three fixture functions above with real endpoints, once
-  built.
-- Decide whether Home's per-line "Active"/"Available" badge should
-  become a real cross-device status (would need a new public
-  "is this line active" endpoint - deliberately not built this stage,
-  since inventing one wasn't authorised).
-- Management pages (out of scope - only the navigation button exists).
+## This-device run tracking
 
-## Stage 5B — Engineering React interface (implemented)
+`src/features/hmi/activeRunStorage.ts` stores only `{runId,
+productionLine}` in `localStorage`. Everything else — totals, pallets
+remaining, open planned downtime, open changeover — is re-read from
+`GET /api/v1/runs/{run_id}/hmi-state` on load, so nothing shown on the
+tablet is local-only state. If the stored run no longer exists the entry
+is cleared and the operator returns to Home.
+
+## What remains
+
+- Management dashboard pages (`/management`, `/management/performance`)
+  remain placeholders — not built. The backend reporting endpoints exist
+  (`src/dashboard_api.py`, `src/dashboard_reports.py`); no dashboard
+  frontend has been built.
+
+## Engineering React interface (implemented)
 
 The Engineering area (`/engineering`) is no longer a placeholder. It
 is a full, live-backed React interface: `src/features/engineering/`
@@ -80,6 +111,12 @@ plus supporting hooks/types/validation). Every call goes to a confirmed, real
   (`POST .../accept`, `POST .../updates`, `POST .../close`,
   `POST .../handover`) all require an explicit confirmation step and
   never report success until FastAPI confirms it.
+- Close Fault requires the maintenance-preventability answer (Yes / No
+  / Unsure). Nothing is preselected, the close is blocked until the
+  engineer chooses, and a failed close keeps both the answer and the
+  typed repair detail on screen. Interim repair updates do not ask it.
+  This needs migration 0003, which was applied successfully during
+  Stage 6B4, like the rest of Stage 6B.
 - Hand Over Job is shown only to the engineer who has accepted an
   open fault. It requires a note, returns the fault to unassigned /
   `Not Started` (it never reassigns it directly), and records the
@@ -93,4 +130,4 @@ plus supporting hooks/types/validation). Every call goes to a confirmed, real
   never a live Supabase connection, and manual verification of the
   live app was limited to login and read-only fault listing.
 - Management pages (`/management`, `/management/performance`) remain
-  outstanding - still placeholders, out of scope for Stage 5B.
+  outstanding - still placeholders.

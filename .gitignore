@@ -12,6 +12,14 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .env
+.env.*
+!.env.example
+
+# PostgreSQL backups must never be committed
+*.dump
+
+# Node dependencies (anywhere in the tree)
+node_modules/
 
 # Claude Code local settings
 .claude/
@@ -21,3 +29,7 @@ Thumbs.db
 
 # WhatsApp Web Observer Phase 2 shadow-mode message inbox (local only)
 .pulse_shadow_inbox/
+
+# Stage 6B2A mocked visual-verification screenshots (local review only -
+# generated from fictional data against a mocked API, never committed)
+stage6b2_screenshots_tmp/

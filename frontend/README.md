@@ -49,24 +49,41 @@ Screens (`src/features/hmi/screens/`), driven by one state machine in
 | Hourly Update | Previous/new total, updated remaining, expected/actual/gap |
 | Planned Downtime | Start/show elapsed/confirm-end |
 | Report to Engineer | Machine + fault reason (from config where available) + note |
+| Start Changeover | Next product/customer/format for the line; opens a paired planned stop |
+| Complete Changeover | Closes the changeover once the new run's first acceptable packs are produced |
 | Complete Run | Explicit warning before closing the run |
 | Run Completed | Confirmation, back to Home |
 | Exit or Restart | Confirms, explains the run stays Active - never force-closes |
 
-**Live endpoints** (`src/features/hmi/api.ts`): `GET /health`,
-`GET /api/v1/hmi/config`, `POST /api/v1/runs`,
-`POST /api/v1/runs/{run_id}/complete`.
+**Live endpoints** - every HMI workflow calls the real FastAPI backend
+through `src/features/hmi/api.ts`; no fixtures remain:
 
-**Fixture-backed, awaiting API integration**
-(`src/features/hmi/awaitingApiIntegration.ts`): hourly updates,
-planned downtime, report-to-engineer - no backend endpoint exists yet
-for these. See `HMI_FRONTEND_STATUS.md` for the full breakdown of
-what's live vs. fixture-backed and what remains.
+| Workflow | Endpoint |
+| --- | --- |
+| API status indicator | `GET /health` |
+| Line list, machine/button options | `GET /api/v1/hmi/config` |
+| Cross-device line availability (polled every 20s) | `GET /api/v1/hmi/lines` |
+| Start Run | `POST /api/v1/runs` |
+| Active-run recovery | `GET /api/v1/runs/{run_id}/hmi-state` |
+| Hourly Update | `POST /api/v1/runs/{run_id}/hourly-updates` |
+| Planned Downtime start / end | `POST /api/v1/runs/{run_id}/planned-downtime`, `POST /api/v1/planned-downtime/{id}/end` |
+| Report to Engineer | `POST /api/v1/runs/{run_id}/faults` |
+| Start / Complete Changeover | `POST /api/v1/runs/{run_id}/changeovers`, `POST /api/v1/changeovers/{id}/complete` |
+| Complete Run review / Complete Run | `POST /api/v1/runs/{run_id}/completion-preview`, `POST /api/v1/runs/{run_id}/complete` |
 
-The in-progress run is persisted to this device's `localStorage`
-(`activeRunStorage.ts`) so refreshing the browser restores the Active
-Run screen instead of losing track of it - this reflects a real,
-API-confirmed run, not a fixture.
+Every write sends an `Idempotency-Key` header
+(`src/features/hmi/idempotency.ts`), reused for every retry of the same
+action, so a double tap or a retry after a timeout can never write
+twice. All figures shown are calculated by the backend. These endpoints
+need `migrations/0003_pulse_phase1_foundation.sql`, which was applied
+during Stage 6B4. See `HMI_FRONTEND_STATUS.md` for the full breakdown
+and `docs/hmi_integration.md` for the request/response contracts.
+
+This device's `localStorage` (`activeRunStorage.ts`) remembers only
+which run the tablet is working on. After a refresh the HMI re-reads
+that run's current state from `GET /api/v1/runs/{run_id}/hmi-state`;
+production totals, planned downtime and changeovers always come from
+the database, never from the device.
 
 ## Requirements
 
