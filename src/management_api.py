@@ -10,10 +10,11 @@
 # write. No CLI input functions are called from this module.
 
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, model_validator, field_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
 
 try:
     from . import management_auth
@@ -32,10 +33,14 @@ try:
         list_buttons,
         list_machines,
         list_production_lines,
+        list_weekly_targets,
         update_button,
         update_machine,
         update_production_line,
+        upsert_weekly_targets,
     )
+    from .factory_time import production_week_start_date, week_window_starting
+    from .main import line_technicians_by_line
 except ImportError:
     import management_auth
     from database import (
@@ -53,10 +58,14 @@ except ImportError:
         list_buttons,
         list_machines,
         list_production_lines,
+        list_weekly_targets,
         update_button,
         update_machine,
         update_production_line,
+        upsert_weekly_targets,
     )
+    from factory_time import production_week_start_date, week_window_starting
+    from main import line_technicians_by_line
 
 
 router = APIRouter(prefix="/api/v1/management", tags=["management"])
@@ -665,4 +674,120 @@ def technician_performance(
         "minimum_sample_size": MIN_SAMPLE_RUNS,
         "ranked": ranked,
         "insufficient_data": insufficient_data,
+    }
+
+
+# ==========================================================
+# WEEKLY TONNAGE TARGETS
+# ==========================================================
+#
+# One site target plus one per production line, per production week
+# (Monday 06:00 to the following Monday 06:00, Europe/London). A target
+# applies only to the week it is set for - nothing is carried forward
+# automatically. Progress against targets is read from the protected
+# GET /api/v1/dashboard/weekly-targets.
+
+
+class WeeklyTargetEntry(BaseModel):
+    scope: str
+    production_line: str | None = None
+    target_tonnes: Decimal = Field(gt=0, le=Decimal(1_000_000), decimal_places=3)
+
+    @model_validator(mode="after")
+    def scope_matches_line(self):
+        if self.scope == "site":
+            if self.production_line is not None:
+                raise ValueError("A site target must not name a production line.")
+        elif self.scope == "line":
+            if self.production_line not in line_technicians_by_line:
+                raise ValueError(
+                    f"'{self.production_line}' is not a known Production Line."
+                )
+        else:
+            raise ValueError("scope must be 'site' or 'line'.")
+        return self
+
+
+class WeeklyTargetsRequest(BaseModel):
+    week_start: date | None = None
+    targets: list[WeeklyTargetEntry] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def valid_week_and_unique_targets(self):
+        if self.week_start is not None and self.week_start.weekday() != 0:
+            raise ValueError("week_start must be a Monday (production weeks start Monday 06:00).")
+
+        keys = [(t.scope, t.production_line) for t in self.targets]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Each target (site, or a line) may appear only once.")
+
+        return self
+
+
+def _target_api(row):
+    return {
+        "scope": row["scope"],
+        "production_line": row["production_line"],
+        "target_tonnes": float(row["target_tonnes"]),
+        "set_by": row["set_by"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _resolve_week_start(week_start):
+    if week_start is None:
+        return production_week_start_date(datetime.now(timezone.utc))
+    if week_start.weekday() != 0:
+        raise HTTPException(
+            status_code=422,
+            detail="week_start must be a Monday (production weeks start Monday 06:00).",
+        )
+    return week_start
+
+
+@router.get("/weekly-targets")
+def get_weekly_targets(
+    week_start: date | None = None,
+    manager_name: str = Depends(management_auth.require_management_session),
+):
+    resolved = _resolve_week_start(week_start)
+    rows = _safe_db_call("list_weekly_targets", list_weekly_targets, resolved)
+
+    return {
+        "week": week_window_starting(resolved).to_api(),
+        "week_start": resolved,
+        "targets": [_target_api(row) for row in rows],
+    }
+
+
+@router.post("/weekly-targets")
+def set_weekly_targets(
+    payload: WeeklyTargetsRequest,
+    manager_name: str = Depends(management_auth.require_management_session),
+):
+    resolved = _resolve_week_start(payload.week_start)
+
+    results = _safe_db_call(
+        "upsert_weekly_targets",
+        upsert_weekly_targets,
+        resolved,
+        [t.model_dump() for t in payload.targets],
+        manager_name,
+    )
+
+    for previous, saved in results:
+        _write_audit(
+            action="set_weekly_tonnage_target",
+            manager_name=manager_name,
+            record_type="weekly_tonnage_target",
+            record_id=f"{resolved.isoformat()}:{saved['scope']}:{saved['production_line'] or 'site'}",
+            previous_value=None if previous is None else _target_api(previous),
+            new_value=_target_api(saved),
+        )
+
+    return {
+        "status": "success",
+        "week": week_window_starting(resolved).to_api(),
+        "week_start": resolved,
+        "targets": [_target_api(saved) for _previous, saved in results],
     }

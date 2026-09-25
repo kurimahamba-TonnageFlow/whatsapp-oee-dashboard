@@ -19,11 +19,27 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import pytest
 from fastapi.testclient import TestClient
 
-from src import dashboard_api, database
+from src import dashboard_api, database, management_auth
 from src.api import DASHBOARD_ORIGIN, HMI_ORIGIN, app
 
 
 client = TestClient(app)
+
+TEST_MANAGEMENT_PIN = "test-management-pin-0000"
+
+
+@pytest.fixture(autouse=True)
+def management_session(monkeypatch):
+    # Every dashboard route requires a Management session (Stage 6B1).
+    # A real in-memory session is created through management_auth, so
+    # these tests keep exercising each endpoint's own contract.
+    monkeypatch.setattr(management_auth, "MANAGEMENT_PIN", TEST_MANAGEMENT_PIN)
+    management_auth._sessions.clear()
+    session = management_auth.create_session("Test Manager")
+    client.headers["Authorization"] = f"Bearer {session['token']}"
+    yield
+    client.headers.pop("Authorization", None)
+    management_auth._sessions.clear()
 
 
 def _dt(hour=8):

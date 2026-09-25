@@ -24,6 +24,7 @@ try:
     from .engineering_api import router as engineering_router
     from .hmi_config_api import router as hmi_config_router
     from .management_api import router as management_router
+    from .pulse_capture_api import router as pulse_capture_router
     from .runs_api import router as runs_router
     from .whatsapp_webhook import app as whatsapp_app
 except ImportError:
@@ -31,6 +32,7 @@ except ImportError:
     from engineering_api import router as engineering_router
     from hmi_config_api import router as hmi_config_router
     from management_api import router as management_router
+    from pulse_capture_api import router as pulse_capture_router
     from runs_api import router as runs_router
     from whatsapp_webhook import app as whatsapp_app
 
@@ -62,7 +64,8 @@ app.add_middleware(
     allow_origins=[HMI_ORIGIN, DASHBOARD_ORIGIN],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    # Idempotency-Key: every HMI write sends one (src/pulse_capture_api.py).
+    allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
 )
 
 
@@ -72,6 +75,7 @@ app.add_middleware(
 
 app.include_router(dashboard_router)
 app.include_router(runs_router)
+app.include_router(pulse_capture_router)
 app.include_router(management_router)
 app.include_router(engineering_router)
 app.include_router(hmi_config_router)

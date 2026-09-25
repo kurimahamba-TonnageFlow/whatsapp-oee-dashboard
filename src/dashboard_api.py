@@ -22,7 +22,16 @@
 #     source data exists yet - both are returned with an explicit
 #     "not_captured"/"not_available" status, never invented zeros.
 
-from datetime import date, datetime, timezone
+#
+# AUTHENTICATION (Stage 6B1): every route on this router requires a
+# valid Management session (Authorization: Bearer <token> from
+# POST /api/v1/management/login) - the same server-checked PIN/session
+# pattern as the Management API, not a second auth system. The CORS
+# allow-list in src/api.py is unchanged, but the external dashboard
+# origin can no longer read any of this data without a session.
+
+from datetime import date, datetime, timedelta, timezone
+from typing import Literal
 import csv
 import io
 
@@ -30,6 +39,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 try:
+    from . import dashboard_reports, management_auth
     from .database import (
         get_dashboard_downtime_events,
         get_dashboard_engineering_updates,
@@ -39,9 +49,22 @@ try:
         get_dashboard_planned_downtime,
         get_dashboard_run,
         get_dashboard_summary,
+        get_dashboard_window_data,
+        list_changeovers,
         list_dashboard_runs,
+        list_weekly_targets,
     )
+    from .factory_time import (
+        SHIFT_BASED_WINDOW_KINDS,
+        factory_day_start,
+        production_week_start_date,
+        resolve_window,
+        week_window_starting,
+    )
+    from .main import line_technicians_by_line
 except ImportError:
+    import dashboard_reports
+    import management_auth
     from database import (
         get_dashboard_downtime_events,
         get_dashboard_engineering_updates,
@@ -51,11 +74,26 @@ except ImportError:
         get_dashboard_planned_downtime,
         get_dashboard_run,
         get_dashboard_summary,
+        get_dashboard_window_data,
+        list_changeovers,
         list_dashboard_runs,
+        list_weekly_targets,
     )
+    from factory_time import (
+        SHIFT_BASED_WINDOW_KINDS,
+        factory_day_start,
+        production_week_start_date,
+        resolve_window,
+        week_window_starting,
+    )
+    from main import line_technicians_by_line
 
 
-router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
+router = APIRouter(
+    prefix="/api/v1/dashboard",
+    tags=["dashboard"],
+    dependencies=[Depends(management_auth.require_management_session)],
+)
 
 MAX_PAGE_SIZE = 100
 DEFAULT_PAGE_SIZE = 25
@@ -148,8 +186,10 @@ class DashboardRunSummary(BaseModel):
     status: str
     started_at: datetime
     finished_at: datetime | None
-    pallets_remaining: int
-    total_pallets_completed: int
+    # float, not int: migration 0003 widens pallet progress to
+    # numeric(14,4), so a run can hold 21.25 pallets remaining.
+    pallets_remaining: float
+    total_pallets_completed: float
     changeover_type: str | None
 
 
@@ -173,11 +213,11 @@ class DashboardRunDetail(BaseModel):
     target_speed_ppm: float
     cases_per_pallet: int
     starting_pallets_remaining: int
-    pallets_remaining: int
+    pallets_remaining: float
     previous_run_completed: int
-    total_pallets_completed: int
-    potential_overrun_pallets: int
-    confirmed_overrun_pallets: int
+    total_pallets_completed: float
+    potential_overrun_pallets: float
+    confirmed_overrun_pallets: float
     status: str
     started_at: datetime
     finished_at: datetime | None
@@ -540,3 +580,163 @@ def dashboard_export(filters: dict = Depends(dashboard_filters)):
             "Content-Disposition": "attachment; filename=pulse_runs_export.csv"
         },
     )
+
+
+# ==========================================================
+# WINDOW-BASED REPORTS (Stage 6B1)
+# ==========================================================
+#
+# Windows are Europe/London factory time (src/factory_time.py):
+# current_shift, factory_day (06:00-06:00), production_week (Monday
+# 06:00 - Monday 06:00) and rolling_24h. Overview defaults to the
+# current shift; Operational Intelligence, Engineering and QC reads
+# default to the previous 24 hours. All figures are calculated by
+# src/pulse_calculations.py via src/dashboard_reports.py.
+
+WindowKind = Literal["current_shift", "factory_day", "production_week", "rolling_24h"]
+ShiftName = Literal["Day", "Afternoon", "Night"]
+ChangeoverGroup = Literal[
+    "line", "technician", "shift", "customer", "product", "pack_weight",
+    "format", "day", "week", "month", "duration",
+]
+
+
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+
+def _require_known_line(production_line):
+    if production_line is not None and production_line not in line_technicians_by_line:
+        raise HTTPException(
+            status_code=422, detail=f"'{production_line}' is not a known Production Line."
+        )
+
+
+def _window_report(builder, window_kind, production_line):
+    _require_known_line(production_line)
+    now = _utc_now()
+    window = resolve_window(window_kind, now)
+    data = _call_db(
+        "get_dashboard_window_data",
+        get_dashboard_window_data,
+        window.start,
+        window.end,
+        production_line,
+        window.kind in SHIFT_BASED_WINDOW_KINDS,
+    )
+    return builder(data, window, now)
+
+
+@router.get("/overview")
+def dashboard_overview(
+    window: WindowKind = "current_shift",
+    production_line: str | None = None,
+):
+    return _window_report(dashboard_reports.build_overview, window, production_line)
+
+
+@router.get("/lines")
+def dashboard_lines(window: WindowKind = "current_shift"):
+    overview = _window_report(dashboard_reports.build_overview, window, None)
+    return {
+        "generated_at": overview["generated_at"],
+        "window": overview["window"],
+        "freshness": overview["freshness"],
+        "lines": overview["lines"],
+    }
+
+
+@router.get("/gap-attribution")
+def dashboard_gap_attribution(
+    window: WindowKind = "rolling_24h",
+    production_line: str | None = None,
+):
+    return _window_report(dashboard_reports.build_gap_attribution, window, production_line)
+
+
+@router.get("/machines")
+def dashboard_machines(
+    window: WindowKind = "rolling_24h",
+    production_line: str | None = None,
+):
+    return _window_report(dashboard_reports.build_machine_summary, window, production_line)
+
+
+@router.get("/engineering-classification")
+def dashboard_engineering_classification(
+    window: WindowKind = "rolling_24h",
+    production_line: str | None = None,
+):
+    return _window_report(
+        dashboard_reports.build_engineering_classification, window, production_line
+    )
+
+
+@router.get("/xray-waste")
+def dashboard_xray_waste(
+    window: WindowKind = "rolling_24h",
+    production_line: str | None = None,
+):
+    return _window_report(dashboard_reports.build_xray_waste, window, production_line)
+
+
+@router.get("/weekly-targets")
+def dashboard_weekly_targets(week_start: date | None = None):
+    now = _utc_now()
+
+    if week_start is None:
+        week_start = production_week_start_date(now)
+    elif week_start.weekday() != 0:
+        raise HTTPException(
+            status_code=422,
+            detail="week_start must be a Monday (production weeks start Monday 06:00).",
+        )
+
+    week = week_window_starting(week_start)
+    targets = _call_db("list_weekly_targets", list_weekly_targets, week_start)
+    data = _call_db(
+        "get_dashboard_window_data", get_dashboard_window_data, week.start, week.end, None, True
+    )
+
+    return dashboard_reports.build_weekly_targets(targets, data, week, now)
+
+
+@router.get("/changeovers")
+def dashboard_changeovers(
+    date_from: date | None = Query(default=None, description="First factory day (06:00 London)"),
+    date_to: date | None = Query(default=None, description="Last factory day, inclusive"),
+    production_line: str | None = None,
+    technician: str | None = None,
+    shift: ShiftName | None = None,
+    customer: str | None = None,
+    product: str | None = None,
+    format: str | None = None,
+    pack_weight_kg: float | None = Query(default=None, gt=0),
+    status: Literal["Open", "Completed"] | None = None,
+    min_duration_minutes: float | None = Query(default=None, ge=0),
+    max_duration_minutes: float | None = Query(default=None, ge=0),
+    group_by: ChangeoverGroup | None = None,
+):
+    _require_known_line(production_line)
+
+    if date_from and date_to and date_to < date_from:
+        raise HTTPException(status_code=422, detail="date_to cannot be before date_from.")
+
+    filters = {
+        "production_line": production_line,
+        "technician": technician,
+        "shift": shift,
+        "customer": customer,
+        "product": product,
+        "format": format,
+        "pack_weight_kg": pack_weight_kg,
+        "status": status,
+        "min_duration_minutes": min_duration_minutes,
+        "max_duration_minutes": max_duration_minutes,
+        "started_from": factory_day_start(date_from) if date_from else None,
+        "started_to": factory_day_start(date_to + timedelta(days=1)) if date_to else None,
+    }
+
+    rows = _call_db("list_changeovers", list_changeovers, filters)
+
+    return dashboard_reports.build_changeover_report(rows, group_by, _utc_now())

@@ -157,6 +157,11 @@ MACHINE_SETTING_PAYLOAD = {
 
 HANDOVER_PAYLOAD = {"note": "Escalating to shift lead - need electrical support to continue."}
 
+# Closing a fault additionally requires "Could this fault have been
+# prevented by planned maintenance?" (Stage 6B1).
+CLOSE_MECHANICAL_PAYLOAD = {**MECHANICAL_PAYLOAD, "maintenance_preventable": "Yes"}
+CLOSE_MACHINE_SETTING_PAYLOAD = {**MACHINE_SETTING_PAYLOAD, "maintenance_preventable": "No"}
+
 
 # ==========================================================
 # LOGIN / LOGOUT
@@ -746,7 +751,7 @@ def test_close_mechanical_success(monkeypatch):
 
     response = client.post(
         "/api/v1/engineering/faults/12/close",
-        json=MECHANICAL_PAYLOAD,
+        json=CLOSE_MECHANICAL_PAYLOAD,
         headers=_auth_headers(token),
     )
 
@@ -773,7 +778,7 @@ def test_close_machine_setting_success(monkeypatch):
 
     response = client.post(
         "/api/v1/engineering/faults/12/close",
-        json=MACHINE_SETTING_PAYLOAD,
+        json=CLOSE_MACHINE_SETTING_PAYLOAD,
         headers=_auth_headers(token),
     )
 
@@ -803,7 +808,7 @@ def test_close_wrong_engineer_rejected(monkeypatch):
 
     response = client.post(
         "/api/v1/engineering/faults/12/close",
-        json=MECHANICAL_PAYLOAD,
+        json=CLOSE_MECHANICAL_PAYLOAD,
         headers=_auth_headers(dan_token),
     )
 
@@ -816,7 +821,7 @@ def test_close_unknown_fault_returns_404(monkeypatch):
 
     response = client.post(
         "/api/v1/engineering/faults/999/close",
-        json=MECHANICAL_PAYLOAD,
+        json=CLOSE_MECHANICAL_PAYLOAD,
         headers=_auth_headers(token),
     )
 
@@ -833,7 +838,7 @@ def test_close_already_resolved_fault_returns_409(monkeypatch):
 
     response = client.post(
         "/api/v1/engineering/faults/12/close",
-        json=MECHANICAL_PAYLOAD,
+        json=CLOSE_MECHANICAL_PAYLOAD,
         headers=_auth_headers(token),
     )
 
@@ -858,10 +863,10 @@ def test_close_duplicate_does_not_call_database_twice(monkeypatch):
     monkeypatch.setattr(engineering_api, "close_engineering_fault", fake_close)
 
     first = client.post(
-        "/api/v1/engineering/faults/12/close", json=MECHANICAL_PAYLOAD, headers=_auth_headers(token)
+        "/api/v1/engineering/faults/12/close", json=CLOSE_MECHANICAL_PAYLOAD, headers=_auth_headers(token)
     )
     second = client.post(
-        "/api/v1/engineering/faults/12/close", json=MECHANICAL_PAYLOAD, headers=_auth_headers(token)
+        "/api/v1/engineering/faults/12/close", json=CLOSE_MECHANICAL_PAYLOAD, headers=_auth_headers(token)
     )
 
     assert first.status_code == 200
@@ -870,6 +875,87 @@ def test_close_duplicate_does_not_call_database_twice(monkeypatch):
     # therefore any duplicate final-repair INSERT) is ever attempted.
     assert second.status_code == 409
     assert len(calls) == 1
+
+
+# ==========================================================
+# MAINTENANCE PREVENTABILITY AT CLOSURE (Stage 6B1)
+# ==========================================================
+
+
+@pytest.mark.parametrize("answer", ["Yes", "No", "Unsure"])
+def test_close_records_maintenance_preventability(answer, monkeypatch):
+    token = _login()
+    captured = {}
+
+    def fake_close(downtime_event_id, repair_update, resolved_at):
+        captured.update(repair_update)
+        return _downtime_event_row(
+            production_status="Resolved",
+            engineering_status="Resolved",
+            resolved_at=_dt(60),
+            maintenance_preventable=repair_update["maintenance_preventable"],
+        )
+
+    monkeypatch.setattr(
+        engineering_api, "get_downtime_event_by_id", lambda downtime_event_id: _downtime_event_row()
+    )
+    monkeypatch.setattr(engineering_api, "close_engineering_fault", fake_close)
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/close",
+        json={**MECHANICAL_PAYLOAD, "maintenance_preventable": answer},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    assert captured["maintenance_preventable"] == answer
+    assert captured["repair_classification"] == "Mechanical"
+    assert response.json()["maintenance_preventable"] == answer
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        MECHANICAL_PAYLOAD,
+        {**MECHANICAL_PAYLOAD, "maintenance_preventable": "Maybe"},
+        {**MECHANICAL_PAYLOAD, "maintenance_preventable": ""},
+        {**MECHANICAL_PAYLOAD, "maintenance_preventable": None},
+    ],
+)
+def test_close_requires_a_valid_maintenance_preventability_answer(payload, monkeypatch):
+    token = _login()
+    calls = []
+    monkeypatch.setattr(
+        engineering_api, "get_downtime_event_by_id", lambda downtime_event_id: _downtime_event_row()
+    )
+    monkeypatch.setattr(
+        engineering_api, "close_engineering_fault", lambda *args: calls.append(args)
+    )
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/close", json=payload, headers=_auth_headers(token)
+    )
+
+    assert response.status_code == 422
+    assert calls == []
+
+
+def test_interim_repair_update_does_not_require_preventability(monkeypatch):
+    token = _login()
+    monkeypatch.setattr(
+        engineering_api, "get_downtime_event_by_id", lambda downtime_event_id: _downtime_event_row()
+    )
+    monkeypatch.setattr(
+        engineering_api,
+        "add_engineering_repair_update",
+        lambda downtime_event_id, repair_update: {"id": 9, "created_at": _dt(20)},
+    )
+
+    response = client.post(
+        "/api/v1/engineering/faults/12/updates", json=MECHANICAL_PAYLOAD, headers=_auth_headers(token)
+    )
+
+    assert response.status_code == 200
 
 
 # ==========================================================
@@ -1148,6 +1234,7 @@ REPAIR_UPDATE_FIXTURE = {
     "new_value": None,
     "reason_for_change": None,
     "affected_products_or_formats": None,
+    "maintenance_preventable": "Unsure",
 }
 
 
@@ -1452,6 +1539,21 @@ def test_accept_engineering_fault_writes_ongoing_not_investigating(monkeypatch):
 def test_close_engineering_fault_query_is_guarded():
     source = inspect.getsource(database.close_engineering_fault)
     assert "production_status = 'Ongoing'" in source
+
+
+def test_close_engineering_fault_writes_maintenance_preventability_in_the_guarded_update(monkeypatch):
+    closed_row = _downtime_event_row(
+        production_status="Resolved", engineering_status="Resolved", resolved_at=_dt(60)
+    )
+    fake_connection = _FakeConnection(results=[{"id": 99}, closed_row])
+    monkeypatch.setattr(database, "get_database_connection", lambda: fake_connection)
+
+    database.close_engineering_fault(12, REPAIR_UPDATE_FIXTURE, "2026-09-17T15:00:00+00:00")
+
+    update_query, update_params = fake_connection._cursor.calls[1]
+    assert "maintenance_preventable = %(maintenance_preventable)s" in update_query
+    assert "production_status = 'Ongoing'" in update_query
+    assert update_params["maintenance_preventable"] == "Unsure"
 
 
 # ==========================================================

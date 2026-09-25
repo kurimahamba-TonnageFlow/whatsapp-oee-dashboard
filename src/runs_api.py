@@ -3,35 +3,47 @@
 # Production Run API (HMI integration)
 # ==========================================================
 #
-# HTTP-only. Reuses the existing engine's data and persistence:
-#   - src.main.line_technicians_by_line for known-line/technician checks
-#   - src.database.get_active_production_run to block duplicate active runs
-#   - src.database.save_production_run to persist the run
+# HTTP-only. Start Run and Complete Run are HMI writes, so both require
+# an `Idempotency-Key` header (see src/pulse_capture_api.py): the key,
+# the business rows and the stored response share one database
+# transaction, so a double tap or a retry after a timeout replays the
+# original result instead of writing twice or reporting a misleading
+# conflict.
 #
 # No CLI input functions (input(), choose_option(), collect_run_setup())
 # are called from this module.
 
-import threading
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
 
 try:
-    from .database import (
-        close_production_run,
-        get_active_production_run,
-        get_production_run_by_id,
-        save_production_run,
+    from .database import create_production_run, record_xray_capture
+    from .main import line_technicians_by_line
+    from .pulse_capture_api import (
+        IdempotencyKey,
+        XrayCountRequest,
+        build_idempotency,
+        load_run,
+        require_line_technician,
+        run_idempotent_write,
+        strip_optional,
+        xray_capture_api,
     )
-    from .main import current_timestamp, line_technicians_by_line
 except ImportError:
-    from database import (
-        close_production_run,
-        get_active_production_run,
-        get_production_run_by_id,
-        save_production_run,
+    from database import create_production_run, record_xray_capture
+    from main import line_technicians_by_line
+    from pulse_capture_api import (
+        IdempotencyKey,
+        XrayCountRequest,
+        build_idempotency,
+        load_run,
+        require_line_technician,
+        run_idempotent_write,
+        strip_optional,
+        xray_capture_api,
     )
-    from main import current_timestamp, line_technicians_by_line
 
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
@@ -56,6 +68,14 @@ class StartRunRequest(BaseModel):
     cases_per_pallet: int = Field(ge=1)
     pallets_remaining: int = Field(ge=0)
     previous_run_completed: int = Field(ge=0)
+    # Optional so existing callers keep working; the QC changeover and
+    # dashboard filters use it when sent.
+    format: str | None = Field(default=None, max_length=120)
+
+    @field_validator("format")
+    @classmethod
+    def optional_format(cls, value):
+        return strip_optional(value)
 
     @field_validator(
         "production_line",
@@ -105,106 +125,51 @@ class StartRunRequest(BaseModel):
 
 
 # ==========================================================
-# DUPLICATE-SUBMISSION GUARD
-# ==========================================================
-# A non-blocking per-line lock. If a second Start Run request for the
-# same Production Line arrives while the first is still being checked
-# / persisted, it is rejected immediately instead of racing the first
-# request to read/write the active-run state.
-
-_line_locks: dict[str, threading.Lock] = {}
-_line_locks_guard = threading.Lock()
-
-
-def _lock_for_line(production_line: str) -> threading.Lock:
-    with _line_locks_guard:
-        return _line_locks.setdefault(production_line, threading.Lock())
-
-
-# ==========================================================
 # START RUN
 # ==========================================================
 
 
+def _start_run_response(result):
+    return {
+        "status": "success",
+        "message": "Run started",
+        "run_id": result["run_id"],
+        "production_line": result["production_line"],
+        "line_technician": result["line_technician"],
+        "pallets_remaining": result["pallets_remaining"],
+    }
+
+
 @router.post("/runs", status_code=201)
-def start_run(payload: StartRunRequest):
-    lock = _lock_for_line(payload.production_line)
+def start_run(payload: StartRunRequest, idempotency_key: IdempotencyKey):
+    database_run = {
+        "production_line": payload.production_line,
+        "line_technician": payload.line_technician,
+        "shift": payload.shift,
+        "customer": payload.customer,
+        "product": payload.product,
+        "pack_weight_kg": payload.pack_weight_kg,
+        "packs_per_case": payload.packs_per_case,
+        "pack_type": payload.pack_type,
+        "target_speed_ppm": payload.target_speed_ppm,
+        "cases_per_pallet": payload.cases_per_pallet,
+        "starting_pallets_remaining": payload.pallets_remaining,
+        "pallets_remaining": payload.pallets_remaining,
+        "previous_run_completed": payload.previous_run_completed,
+        "format": payload.format,
+    }
 
-    if not lock.acquire(blocking=False):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "A Run Start request for Production Line "
-                f"'{payload.production_line}' is already being processed."
-            ),
-        )
+    idempotency = build_idempotency(
+        idempotency_key,
+        f"run_start:{payload.production_line}",
+        payload,
+        201,
+        _start_run_response,
+    )
 
-    try:
-        try:
-            active_run = get_active_production_run(payload.production_line)
-
-        except Exception:
-            print("DATABASE ERROR")
-            print("Could not check for an active run.")
-
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Could not verify existing Production Runs. "
-                    "Please try again."
-                ),
-            )
-
-        if active_run is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Production Line '{payload.production_line}' "
-                    "already has an active Production Run."
-                ),
-            )
-
-        database_run = {
-            "production_line": payload.production_line,
-            "line_technician": payload.line_technician,
-            "shift": payload.shift,
-            "customer": payload.customer,
-            "product": payload.product,
-            "pack_weight_kg": payload.pack_weight_kg,
-            "packs_per_case": payload.packs_per_case,
-            "pack_type": payload.pack_type,
-            "target_speed_ppm": payload.target_speed_ppm,
-            "cases_per_pallet": payload.cases_per_pallet,
-            "starting_pallets_remaining": payload.pallets_remaining,
-            "pallets_remaining": payload.pallets_remaining,
-            "previous_run_completed": payload.previous_run_completed,
-        }
-
-        try:
-            run_id = save_production_run(database_run)
-
-        except Exception:
-            print("DATABASE ERROR")
-            print("Production Run was NOT saved to Supabase.")
-
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Production Run could not be saved. Please try again."
-                ),
-            )
-
-        return {
-            "status": "success",
-            "message": "Run started",
-            "run_id": run_id,
-            "production_line": payload.production_line,
-            "line_technician": payload.line_technician,
-            "pallets_remaining": payload.pallets_remaining,
-        }
-
-    finally:
-        lock.release()
+    return run_idempotent_write(
+        "create_production_run", create_production_run, database_run, idempotency=idempotency
+    )
 
 
 # ==========================================================
@@ -213,49 +178,38 @@ def start_run(payload: StartRunRequest):
 
 
 @router.post("/runs/{run_id}/complete", status_code=200)
-def complete_run(run_id: int):
-    try:
-        run = get_production_run_by_id(run_id)
+def complete_run(run_id: int, payload: XrayCountRequest, idempotency_key: IdempotencyKey):
+    """Completing a run REQUIRES:
+      - whether production was made since the last hourly update, and if
+        so the final pallets (saved as a final hourly update FIRST, so
+        the X-ray waste estimate includes them);
+      - the end-of-run X-ray pack count, or count_unavailable=true with
+        a reason.
+    The final hourly update, the X-ray record and the run's Completed
+    status are written in ONE transaction - all of them or none."""
+    run = load_run(run_id)
+    require_line_technician(run["production_line"], payload.line_technician)
 
-    except Exception:
-        print("DATABASE ERROR")
-        print("Could not look up the Production Run to complete.")
+    def response(saved):
+        return {
+            "status": "success",
+            "message": "Run completed",
+            "run_id": run_id,
+            "production_line": saved["production_line"],
+            "run_status": "Completed",
+            "xray": xray_capture_api(saved),
+        }
 
-        raise HTTPException(
-            status_code=503,
-            detail="Could not verify the Production Run. Please try again.",
-        )
+    idempotency = build_idempotency(
+        idempotency_key, f"run_complete:{run_id}", payload, 200, response
+    )
 
-    if run is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Production Run {run_id} was not found.",
-        )
-
-    if run["status"] == "Completed":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Production Run {run_id} is already completed.",
-        )
-
-    finished_at = current_timestamp()
-
-    try:
-        closed_id = close_production_run(run_id, finished_at)
-
-    except Exception:
-        print("DATABASE ERROR")
-        print("Production Run was NOT marked as completed.")
-
-        raise HTTPException(
-            status_code=503,
-            detail="Could not complete the Production Run. Please try again.",
-        )
-
-    return {
-        "status": "success",
-        "message": "Run completed",
-        "run_id": closed_id,
-        "production_line": run["production_line"],
-        "run_status": "Completed",
-    }
+    return run_idempotent_write(
+        "record_xray_capture",
+        record_xray_capture,
+        run_id,
+        payload.as_capture(),
+        datetime.now(timezone.utc),
+        True,
+        idempotency=idempotency,
+    )

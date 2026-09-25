@@ -1,9 +1,18 @@
+from dataclasses import dataclass
 import os
+from typing import Callable
 
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
 from dotenv import load_dotenv
+
+try:
+    from . import pulse_calculations as calc
+    from .factory_time import normalise_shift_name, operational_shift_window, shift_name_at
+except ImportError:
+    import pulse_calculations as calc
+    from factory_time import normalise_shift_name, operational_shift_window, shift_name_at
 
 
 # ==========================================================
@@ -37,7 +46,14 @@ def get_database_connection():
 
 
 def save_production_run(run):
-    query = """
+    # `format` (migration 0003) is written only when supplied, so every
+    # existing caller - the CLI and a Start Run request without a
+    # format - issues exactly the same INSERT as before that migration.
+    has_format = run.get("format") is not None
+    format_column = ",\n            format" if has_format else ""
+    format_value = ",\n            %(format)s" if has_format else ""
+
+    query = f"""
         INSERT INTO public.production_runs (
             production_line,
             line_technician,
@@ -51,7 +67,7 @@ def save_production_run(run):
             cases_per_pallet,
             starting_pallets_remaining,
             pallets_remaining,
-            previous_run_completed
+            previous_run_completed{format_column}
         )
         VALUES (
             %(production_line)s,
@@ -66,7 +82,7 @@ def save_production_run(run):
             %(cases_per_pallet)s,
             %(starting_pallets_remaining)s,
             %(pallets_remaining)s,
-            %(previous_run_completed)s
+            %(previous_run_completed)s{format_value}
         )
         RETURNING id;
     """
@@ -1547,6 +1563,81 @@ def get_public_hmi_config():
             return cursor.fetchall()
 
 
+def get_hmi_line_state():
+    """One row per ACTIVE configured line, with the authoritative state
+    of that line right now - read-only, and safe for the unauthenticated
+    factory-floor HMI.
+
+    Deliberately excludes everything Management-only: no tonnage, no
+    achievement or OEE figures, no targets, no waste, no costs and no
+    technician performance. Only what a tablet needs to decide whether a
+    line can be started and, if not, what is happening on it.
+
+    A line with no active run returns NULL for every run column - that
+    is "available", not missing data. Inactive configured lines are
+    excluded entirely (pl.active = true), exactly like the HMI config
+    endpoint.
+    """
+    query = """
+        SELECT
+            pl.id   AS line_id,
+            pl.name AS line_name,
+            r.id    AS run_id,
+            r.line_technician,
+            r.shift,
+            r.customer,
+            r.product,
+            r.started_at,
+            (
+                SELECT MAX(COALESCE(hu.period_ended_at, hu.created_at))
+                FROM public.hourly_updates AS hu
+                WHERE hu.production_run_id = r.id
+            ) AS last_hourly_update_at,
+            (
+                SELECT pde.id
+                FROM public.planned_downtime_events AS pde
+                WHERE pde.production_run_id = r.id AND pde.ended_at IS NULL
+                LIMIT 1
+            ) AS open_planned_downtime_id,
+            (
+                SELECT MAX(pde.started_at)
+                FROM public.planned_downtime_events AS pde
+                WHERE pde.production_run_id = r.id
+            ) AS last_planned_downtime_at,
+            (
+                SELECT co.id
+                FROM public.changeovers AS co
+                WHERE co.previous_production_run_id = r.id AND co.status = 'Open'
+                LIMIT 1
+            ) AS open_changeover_id,
+            (
+                SELECT MAX(co.started_at)
+                FROM public.changeovers AS co
+                WHERE co.previous_production_run_id = r.id
+            ) AS last_changeover_at,
+            (
+                SELECT COUNT(*)
+                FROM public.downtime_events AS de
+                WHERE de.production_run_id = r.id AND de.production_status = 'Ongoing'
+            ) AS open_fault_count,
+            (
+                SELECT MAX(de.opened_at)
+                FROM public.downtime_events AS de
+                WHERE de.production_run_id = r.id
+            ) AS last_fault_opened_at
+        FROM public.production_lines AS pl
+        LEFT JOIN public.production_runs AS r
+            ON r.production_line = pl.name AND r.status = 'Active'
+        WHERE pl.active = true
+        ORDER BY pl.display_order, pl.name;
+    """
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(query)
+            return cursor.fetchall()
+
+
 # ----------------------------------------------------------
 # ACTIVE RUNS (ACROSS ALL LINES) + FORCE CLOSE
 # ----------------------------------------------------------
@@ -2061,13 +2152,14 @@ def close_engineering_fault(downtime_event_id, repair_update, resolved_at):
         SET
             production_status = 'Resolved',
             engineering_status = 'Resolved',
-            resolved_at = %(resolved_at)s
+            resolved_at = %(resolved_at)s,
+            maintenance_preventable = %(maintenance_preventable)s
         WHERE id = %(downtime_event_id)s
           AND production_status = 'Ongoing'
         RETURNING
             id, production_run_id, fault_id, machine, reason, reported_by,
             engineer, production_status, engineering_status, opened_at,
-            accepted_at, resolved_at;
+            accepted_at, resolved_at, maintenance_preventable;
     """
 
     with get_database_connection() as connection:
@@ -2077,7 +2169,11 @@ def close_engineering_fault(downtime_event_id, repair_update, resolved_at):
 
             cursor.execute(
                 update_query,
-                {"downtime_event_id": downtime_event_id, "resolved_at": resolved_at},
+                {
+                    "downtime_event_id": downtime_event_id,
+                    "resolved_at": resolved_at,
+                    "maintenance_preventable": repair_update["maintenance_preventable"],
+                },
             )
             closed = cursor.fetchone()
 
@@ -2175,3 +2271,1571 @@ def hand_over_engineering_fault(downtime_event_id, handover):
         connection.commit()
 
     return released
+
+
+# ==========================================================
+# PULSE PHASE 1 FOUNDATION (Stage 6B1 / 6B2)
+# ==========================================================
+#
+# Requires migrations/0003_pulse_phase1_foundation.sql. Every write
+# below runs in ONE transaction:
+#   1. it first claims the client's Idempotency-Key (hmi_idempotency_keys),
+#      so a double tap or a retry after a timeout replays the original
+#      response instead of writing twice;
+#   2. it locks the production_runs row (SELECT ... FOR UPDATE) before
+#      reading anything it depends on, so concurrent writes on the same
+#      run are serialised;
+#   3. it stores the response it is about to return in the same
+#      transaction before COMMIT.
+# All manufacturing arithmetic is delegated to src/pulse_calculations.py
+# (Decimal); this module only reads and writes rows.
+
+
+class PulseCaptureError(Exception):
+    """A capture request the database state rejects. `status_code` is
+    the HTTP status the API layer should return; `message` is always a
+    safe, pre-written sentence (never exception text)."""
+
+    def __init__(self, status_code, message):
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+class IdempotentReplay(Exception):
+    """The Idempotency-Key was already completed with the same request:
+    the caller must return the stored response unchanged."""
+
+    def __init__(self, status_code, body):
+        super().__init__("idempotent replay")
+        self.status_code = status_code
+        self.body = body
+
+
+#: How long a used Idempotency-Key keeps protecting its action. Must
+#: match the expires_at DEFAULT in migration 0003.
+IDEMPOTENCY_RETENTION_DAYS = 90
+
+
+@dataclass(frozen=True)
+class IdempotencyRequest:
+    key: str
+    action: str
+    fingerprint: str
+    # respond(result) -> (status_code, JSON-serialisable body). Called
+    # inside the transaction so the stored response is exactly what the
+    # first successful request returned.
+    respond: Callable
+
+
+def _claim_idempotency(cursor, connection, idempotency, production_run_id=None):
+    if idempotency is None:
+        return
+
+    params = {
+        "key": idempotency.key,
+        "action": idempotency.action,
+        "fingerprint": idempotency.fingerprint,
+        "production_run_id": production_run_id,
+    }
+
+    # A concurrent request with the same key blocks here until the
+    # first one commits (then conflicts) or rolls back (then succeeds).
+    #
+    # DO UPDATE ... WHERE expires_at <= now() is the expired-key rule: a
+    # key whose retention period has passed is taken over as a brand-new
+    # logical action, inside this same transaction. A key still within
+    # its period never matches that WHERE, so no row is returned and we
+    # fall through to the replay/conflict path below - a live key is
+    # never silently overwritten. created_at and expires_at come from
+    # the database clock, never from the request.
+    cursor.execute(
+        f"""
+        INSERT INTO public.hmi_idempotency_keys (
+            idempotency_key, action, request_fingerprint, production_run_id
+        )
+        VALUES (%(key)s, %(action)s, %(fingerprint)s, %(production_run_id)s)
+        ON CONFLICT (idempotency_key) DO UPDATE
+        SET action = EXCLUDED.action,
+            request_fingerprint = EXCLUDED.request_fingerprint,
+            production_run_id = EXCLUDED.production_run_id,
+            response_status = NULL,
+            response_body = NULL,
+            created_at = now(),
+            expires_at = now() + interval '{IDEMPOTENCY_RETENTION_DAYS} days'
+        WHERE public.hmi_idempotency_keys.expires_at <= now()
+        RETURNING idempotency_key;
+        """,
+        params,
+    )
+    if cursor.fetchone() is not None:
+        return
+
+    cursor.execute(
+        """
+        SELECT action, request_fingerprint, response_status, response_body
+        FROM public.hmi_idempotency_keys
+        WHERE idempotency_key = %(key)s;
+        """,
+        params,
+    )
+    existing = cursor.fetchone()
+    connection.rollback()
+
+    if existing is None or existing["response_status"] is None:
+        raise PulseCaptureError(
+            409, "This action is still being processed. Wait a moment, then check before trying again."
+        )
+
+    if existing["action"] != idempotency.action or existing["request_fingerprint"] != idempotency.fingerprint:
+        raise PulseCaptureError(
+            409,
+            "This request was already used with different details. Nothing new was saved - "
+            "refresh to see the latest state.",
+        )
+
+    raise IdempotentReplay(existing["response_status"], existing["response_body"])
+
+
+def delete_expired_idempotency_keys(batch_size=None):
+    """MAINTENANCE ONLY - deletes idempotency keys whose retention period
+    has already passed, and nothing else.
+
+    This is deliberately never called from an HMI write. Sweeping on the
+    write path would put an unbounded DELETE inside a request that an
+    operator is waiting on, and a clock skew or a bug there could remove
+    a key that is still protecting an in-flight action. Run it as a
+    scheduled maintenance job instead.
+
+    Safety properties:
+      - the WHERE clause is `expires_at <= now()` and cannot be widened
+        by a caller; there is no "delete all" mode and no key argument,
+      - `now()` is the database clock, so a wrong clock on whatever host
+        runs the job cannot expire a key early,
+      - a non-expired key is never matched, so replay protection for
+        every live key is unaffected,
+      - leaving expired rows in place is harmless: they keep protecting
+        their key until this runs.
+
+    batch_size, when given, limits one call to that many oldest expired
+    rows so a large first sweep can be run in steps. Returns the number
+    of rows actually deleted.
+    """
+    if batch_size is not None and batch_size < 1:
+        raise ValueError("batch_size must be at least 1 when given.")
+
+    if batch_size is None:
+        statement = """
+            DELETE FROM public.hmi_idempotency_keys
+            WHERE expires_at <= now();
+        """
+        params = {}
+    else:
+        statement = """
+            DELETE FROM public.hmi_idempotency_keys
+            WHERE idempotency_key IN (
+                SELECT idempotency_key
+                FROM public.hmi_idempotency_keys
+                WHERE expires_at <= now()
+                ORDER BY expires_at
+                LIMIT %(batch_size)s
+            );
+        """
+        params = {"batch_size": batch_size}
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(statement, params)
+            return cursor.rowcount
+
+
+def _store_idempotent_response(cursor, idempotency, result):
+    if idempotency is None:
+        return
+
+    status_code, body = idempotency.respond(result)
+    cursor.execute(
+        """
+        UPDATE public.hmi_idempotency_keys
+        SET response_status = %(status)s, response_body = %(body)s
+        WHERE idempotency_key = %(key)s;
+        """,
+        {"status": status_code, "body": Json(body), "key": idempotency.key},
+    )
+
+
+_CAPTURE_RUN_COLUMNS = """
+    id, production_line, line_technician, shift, customer, product, format,
+    pack_type, pack_weight_kg, packs_per_case, cases_per_pallet, target_speed_ppm,
+    starting_pallets_remaining, pallets_remaining, total_pallets_completed,
+    potential_overrun_pallets, status, started_at, finished_at
+"""
+
+
+def _lock_active_run(cursor, connection, production_run_id):
+    cursor.execute(
+        f"""
+        SELECT {_CAPTURE_RUN_COLUMNS}
+        FROM public.production_runs
+        WHERE id = %(production_run_id)s
+        FOR UPDATE;
+        """,
+        {"production_run_id": production_run_id},
+    )
+    run = cursor.fetchone()
+
+    if run is None:
+        connection.rollback()
+        raise PulseCaptureError(404, f"Production Run {production_run_id} was not found.")
+
+    if run["status"] != "Active":
+        connection.rollback()
+        raise PulseCaptureError(409, f"Production Run {production_run_id} is not active.")
+
+    return run
+
+
+def _run_shift_name(run, moment):
+    """The run's recorded shift is authoritative; the clock is only a
+    fallback for a legacy run whose shift label is unrecognised."""
+    return normalise_shift_name(run["shift"]) or shift_name_at(moment)
+
+
+def _planned_intervals(cursor, production_run_id, period_start, period_end):
+    cursor.execute(
+        """
+        SELECT reason, started_at, ended_at
+        FROM public.planned_downtime_events
+        WHERE production_run_id = %(production_run_id)s
+          AND started_at < %(period_end)s
+          AND (ended_at IS NULL OR ended_at > %(period_start)s);
+        """,
+        {
+            "production_run_id": production_run_id,
+            "period_start": period_start,
+            "period_end": period_end,
+        },
+    )
+    return cursor.fetchall()
+
+
+def _insert_hourly_update(cursor, connection, run, pallets_produced, line_technician, other_loss_reason, recorded_at):
+    """Writes one hourly update for an already-locked run and advances
+    the run's progress. The period runs from the end of the run's
+    previous hourly period (or the run start) to `recorded_at`; expected
+    output covers exactly that elapsed time. The output belongs to the
+    run's recorded shift instance (operational_shift_window), never to
+    whichever shift the period happens to end in."""
+    production_run_id = run["id"]
+
+    cursor.execute(
+        """
+        SELECT MAX(COALESCE(period_ended_at, created_at)) AS last_end
+        FROM public.hourly_updates
+        WHERE production_run_id = %(production_run_id)s;
+        """,
+        {"production_run_id": production_run_id},
+    )
+    last_end = cursor.fetchone()["last_end"]
+    period_start = last_end or run["started_at"]
+    period_minutes = calc.minutes_between(period_start, recorded_at)
+
+    if period_minutes <= 0:
+        connection.rollback()
+        raise PulseCaptureError(
+            409,
+            "Another hourly update for this run was saved at the same moment. "
+            "Refresh to see the latest totals.",
+        )
+
+    planned_rows = _planned_intervals(cursor, production_run_id, period_start, recorded_at)
+    planned_pieces = calc.intersect_intervals(
+        [(row["started_at"], row["ended_at"] or recorded_at) for row in planned_rows],
+        [(period_start, recorded_at)],
+    )
+    planned_minutes = calc.total_minutes(planned_pieces)
+    planned_reasons = sorted({row["reason"] for row in planned_rows})
+
+    values = calc.hourly_update_values(
+        calc.PackConfig.from_row(run),
+        pallets_produced,
+        period_minutes,
+        planned_minutes,
+        run,
+    )
+
+    shift_name = _run_shift_name(run, recorded_at)
+    shift_window = operational_shift_window(shift_name, recorded_at)
+
+    cursor.execute(
+        """
+        INSERT INTO public.hourly_updates (
+            production_run_id, pallets_completed, planned_downtime,
+            planned_downtime_minutes, expected_packs, actual_packs,
+            expected_pallets, actual_pallets, production_variance_packs,
+            estimated_lost_packs, estimated_lost_minutes, unexplained_loss,
+            unexplained_loss_reason, pallets_remaining, created_at,
+            period_started_at, period_ended_at, period_minutes, shift,
+            shift_window_start, line_technician, other_loss_reason, submitted_via
+        )
+        VALUES (
+            %(production_run_id)s, %(pallets_completed)s, %(planned_downtime)s,
+            %(planned_downtime_minutes)s, %(expected_packs)s, %(actual_packs)s,
+            %(expected_pallets)s, %(actual_pallets)s, %(production_variance_packs)s,
+            %(estimated_lost_packs)s, %(estimated_lost_minutes)s, FALSE,
+            NULL, %(pallets_remaining)s, %(recorded_at)s,
+            %(period_started_at)s, %(recorded_at)s, %(period_minutes)s, %(shift)s,
+            %(shift_window_start)s, %(line_technician)s, %(other_loss_reason)s, 'react_hmi'
+        )
+        RETURNING id;
+        """,
+        {
+            **values,
+            "production_run_id": production_run_id,
+            "planned_downtime": ", ".join(planned_reasons) or "None",
+            "recorded_at": recorded_at,
+            "period_started_at": period_start,
+            "shift": shift_name,
+            "shift_window_start": shift_window.start,
+            "line_technician": line_technician,
+            "other_loss_reason": other_loss_reason,
+        },
+    )
+    hourly_update_id = cursor.fetchone()["id"]
+
+    cursor.execute(
+        """
+        UPDATE public.production_runs
+        SET
+            pallets_remaining = %(pallets_remaining)s,
+            total_pallets_completed = %(total_pallets_completed)s,
+            potential_overrun_pallets = %(potential_overrun_pallets)s
+        WHERE id = %(production_run_id)s
+        RETURNING id;
+        """,
+        {**values, "production_run_id": production_run_id},
+    )
+    cursor.fetchone()
+
+    for key in ("pallets_remaining", "total_pallets_completed", "potential_overrun_pallets"):
+        run[key] = values[key]
+
+    return {
+        **values,
+        "hourly_update_id": hourly_update_id,
+        "period_started_at": period_start,
+        "period_ended_at": recorded_at,
+        "shift": shift_name,
+        "shift_window_start": shift_window.start,
+    }
+
+
+def record_hourly_update(
+    production_run_id,
+    pallets_produced,
+    line_technician,
+    other_loss_reason,
+    recorded_at,
+    idempotency=None,
+):
+    """Persists one React HMI hourly update and the run's progress.
+    Duplicates are prevented by the Idempotency-Key, not by a time
+    window: two genuinely different updates (different keys) are both
+    accepted, a repeat of the same one is replayed."""
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            _claim_idempotency(cursor, connection, idempotency, production_run_id)
+            run = _lock_active_run(cursor, connection, production_run_id)
+            saved = _insert_hourly_update(
+                cursor, connection, run, pallets_produced, line_technician, other_loss_reason, recorded_at
+            )
+            result = {
+                **saved,
+                "production_run_id": production_run_id,
+                "production_line": run["production_line"],
+                "config": calc.PackConfig.from_row(run),
+            }
+            _store_idempotent_response(cursor, idempotency, result)
+
+        connection.commit()
+
+    return result
+
+
+def start_planned_downtime(production_run_id, reason, started_by, started_at, idempotency=None):
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            _claim_idempotency(cursor, connection, idempotency, production_run_id)
+            run = _lock_active_run(cursor, connection, production_run_id)
+
+            cursor.execute(
+                """
+                SELECT id FROM public.planned_downtime_events
+                WHERE production_run_id = %(production_run_id)s AND ended_at IS NULL;
+                """,
+                {"production_run_id": production_run_id},
+            )
+            if cursor.fetchone() is not None:
+                connection.rollback()
+                raise PulseCaptureError(
+                    409, "Planned downtime is already in progress for this run."
+                )
+
+            cursor.execute(
+                """
+                INSERT INTO public.planned_downtime_events (
+                    production_run_id, production_line, reason, started_by, started_at
+                )
+                VALUES (
+                    %(production_run_id)s, %(production_line)s, %(reason)s,
+                    %(started_by)s, %(started_at)s
+                )
+                RETURNING id, production_run_id, production_line, reason,
+                          started_by, started_at, ended_by, ended_at, duration_minutes;
+                """,
+                {
+                    "production_run_id": production_run_id,
+                    "production_line": run["production_line"],
+                    "reason": reason,
+                    "started_by": started_by,
+                    "started_at": started_at,
+                },
+            )
+            event = cursor.fetchone()
+            _store_idempotent_response(cursor, idempotency, event)
+
+        connection.commit()
+
+    return event
+
+
+def end_planned_downtime(planned_downtime_event_id, ended_by, ended_at, idempotency=None):
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            _claim_idempotency(cursor, connection, idempotency)
+
+            cursor.execute(
+                """
+                SELECT id, started_at, ended_at
+                FROM public.planned_downtime_events
+                WHERE id = %(id)s
+                FOR UPDATE;
+                """,
+                {"id": planned_downtime_event_id},
+            )
+            event = cursor.fetchone()
+
+            if event is None:
+                connection.rollback()
+                raise PulseCaptureError(
+                    404, f"Planned downtime {planned_downtime_event_id} was not found."
+                )
+
+            if event["ended_at"] is not None:
+                connection.rollback()
+                raise PulseCaptureError(
+                    409, f"Planned downtime {planned_downtime_event_id} has already ended."
+                )
+
+            if ended_at < event["started_at"]:
+                connection.rollback()
+                raise PulseCaptureError(
+                    409, "Planned downtime cannot end before it started."
+                )
+
+            cursor.execute(
+                """
+                SELECT id FROM public.changeovers
+                WHERE planned_downtime_event_id = %(id)s AND status = 'Open';
+                """,
+                {"id": planned_downtime_event_id},
+            )
+            if cursor.fetchone() is not None:
+                connection.rollback()
+                raise PulseCaptureError(
+                    409,
+                    "This planned stop belongs to a changeover. Use Changeover Complete "
+                    "once acceptable packs of the new run are being produced.",
+                )
+
+            cursor.execute(
+                """
+                UPDATE public.planned_downtime_events
+                SET ended_at = %(ended_at)s,
+                    ended_by = %(ended_by)s,
+                    duration_minutes = %(duration_minutes)s
+                WHERE id = %(id)s AND ended_at IS NULL
+                RETURNING id, production_run_id, production_line, reason,
+                          started_by, started_at, ended_by, ended_at, duration_minutes;
+                """,
+                {
+                    "id": planned_downtime_event_id,
+                    "ended_at": ended_at,
+                    "ended_by": ended_by,
+                    "duration_minutes": calc.for_storage(
+                        calc.duration_minutes(event["started_at"], ended_at)
+                    ),
+                },
+            )
+            ended = cursor.fetchone()
+            _store_idempotent_response(cursor, idempotency, ended)
+
+        connection.commit()
+
+    return ended
+
+
+def report_fault_to_engineering(production_run_id, report, opened_at, idempotency=None):
+    """Creates an Ongoing / Not Started downtime_events row, the same
+    shape the Engineering workflow (Stage 5A) already lists and accepts.
+    fault_id is the next per-run sequence number, read under the run's
+    row lock so two simultaneous reports can never share one."""
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            _claim_idempotency(cursor, connection, idempotency, production_run_id)
+            run = _lock_active_run(cursor, connection, production_run_id)
+
+            machine_name = report["machine"]
+            reason = report["reason"]
+
+            if report.get("machine_id") is not None:
+                cursor.execute(
+                    """
+                    SELECT m.id, m.name, m.active, pl.name AS production_line
+                    FROM public.machines AS m
+                    JOIN public.production_lines AS pl ON pl.id = m.production_line_id
+                    WHERE m.id = %(machine_id)s;
+                    """,
+                    {"machine_id": report["machine_id"]},
+                )
+                machine = cursor.fetchone()
+
+                if (
+                    machine is None
+                    or not machine["active"]
+                    or machine["production_line"] != run["production_line"]
+                ):
+                    connection.rollback()
+                    raise PulseCaptureError(
+                        422, "That machine is not an active machine on this production line."
+                    )
+
+                machine_name = machine["name"]
+
+            if report.get("button_id") is not None:
+                cursor.execute(
+                    """
+                    SELECT id, machine_id, name, event_type, active
+                    FROM public.buttons
+                    WHERE id = %(button_id)s;
+                    """,
+                    {"button_id": report["button_id"]},
+                )
+                button = cursor.fetchone()
+
+                if (
+                    button is None
+                    or not button["active"]
+                    or button["event_type"] != "unplanned_fault"
+                    or button["machine_id"] != report.get("machine_id")
+                ):
+                    connection.rollback()
+                    raise PulseCaptureError(
+                        422, "That fault button does not belong to the selected machine."
+                    )
+
+                reason = button["name"]
+
+            cursor.execute(
+                """
+                SELECT COALESCE(MAX(fault_id), 0) + 1 AS next_fault_id
+                FROM public.downtime_events
+                WHERE production_run_id = %(production_run_id)s;
+                """,
+                {"production_run_id": production_run_id},
+            )
+            fault_id = cursor.fetchone()["next_fault_id"]
+
+            cursor.execute(
+                """
+                INSERT INTO public.downtime_events (
+                    production_run_id, fault_id, machine, machine_id, button_id,
+                    reason, reported_by, engineer_called, production_status,
+                    engineering_status, engineer, retrospective, opened_at,
+                    resolved_at, reported_via, report_note
+                )
+                VALUES (
+                    %(production_run_id)s, %(fault_id)s, %(machine)s, %(machine_id)s,
+                    %(button_id)s, %(reason)s, %(reported_by)s, TRUE, 'Ongoing',
+                    'Not Started', NULL, FALSE, %(opened_at)s, NULL, 'react_hmi',
+                    %(note)s
+                )
+                RETURNING id, production_run_id, fault_id, machine, reason,
+                          reported_by, production_status, engineering_status, opened_at;
+                """,
+                {
+                    "production_run_id": production_run_id,
+                    "fault_id": fault_id,
+                    "machine": machine_name,
+                    "machine_id": report.get("machine_id"),
+                    "button_id": report.get("button_id"),
+                    "reason": reason,
+                    "reported_by": report["reported_by"],
+                    "opened_at": opened_at,
+                    "note": report.get("note"),
+                },
+            )
+            created = {**cursor.fetchone(), "production_line": run["production_line"]}
+            _store_idempotent_response(cursor, idempotency, created)
+
+        connection.commit()
+
+    return created
+
+
+def _sum_pallets(cursor, production_run_id, after_hourly_update_id=None):
+    cursor.execute(
+        """
+        SELECT
+            COALESCE(SUM(pallets_completed), 0) AS pallets,
+            MAX(id) AS last_id
+        FROM public.hourly_updates
+        WHERE production_run_id = %(production_run_id)s
+          AND (%(after_id)s::bigint IS NULL OR id > %(after_id)s::bigint);
+        """,
+        {"production_run_id": production_run_id, "after_id": after_hourly_update_id},
+    )
+    row = cursor.fetchone()
+    return calc.to_decimal(row["pallets"]), row["last_id"]
+
+
+def _last_xray_coverage(cursor, production_run_id):
+    cursor.execute(
+        """
+        SELECT MAX(covered_to_hourly_update_id) AS covered_to
+        FROM public.production_run_xray_counts
+        WHERE production_run_id = %(production_run_id)s;
+        """,
+        {"production_run_id": production_run_id},
+    )
+    return cursor.fetchone()["covered_to"]
+
+
+def get_completion_basis(production_run_id):
+    """Read-only inputs for the Complete Run / end-of-shift review
+    screen: the run's configuration, every pallet recorded so far, and
+    the pallets not yet covered by an earlier X-ray capture."""
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                f"SELECT {_CAPTURE_RUN_COLUMNS} FROM public.production_runs WHERE id = %(id)s;",
+                {"id": production_run_id},
+            )
+            run = cursor.fetchone()
+            if run is None:
+                return None
+
+            total_pallets, _last_id = _sum_pallets(cursor, production_run_id)
+            covered_to = _last_xray_coverage(cursor, production_run_id)
+            uncovered_pallets, _last_id = _sum_pallets(cursor, production_run_id, covered_to)
+
+    return {"run": run, "total_pallets": total_pallets, "uncovered_pallets": uncovered_pallets}
+
+
+def record_xray_capture(production_run_id, capture, captured_at, complete_run, idempotency=None):
+    """Records an end-of-shift or run-completion X-ray capture - and,
+    when the technician reports production since the last hourly update,
+    that final hourly update FIRST - covering every hourly update since
+    the run's previous capture. For run completion the run is closed in
+    the SAME transaction, so a run can never be Completed without its
+    final production and X-ray record, or vice versa."""
+    capture_point = "run_completion" if complete_run else "shift_end"
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            _claim_idempotency(cursor, connection, idempotency, production_run_id)
+            run = _lock_active_run(cursor, connection, production_run_id)
+            config = calc.PackConfig.from_row(run)
+            shift_name = _run_shift_name(run, captured_at)
+            shift_window = operational_shift_window(shift_name, captured_at)
+
+            if capture_point == "shift_end":
+                cursor.execute(
+                    """
+                    SELECT id FROM public.production_run_xray_counts
+                    WHERE production_run_id = %(production_run_id)s
+                      AND capture_point = 'shift_end'
+                      AND shift_window_start = %(shift_window_start)s;
+                    """,
+                    {
+                        "production_run_id": production_run_id,
+                        "shift_window_start": shift_window.start,
+                    },
+                )
+                if cursor.fetchone() is not None:
+                    connection.rollback()
+                    raise PulseCaptureError(
+                        409, "An end-of-shift X-ray count was already recorded for this shift."
+                    )
+
+            final_update = None
+            if capture.get("final_pallets_produced") is not None:
+                final_update = _insert_hourly_update(
+                    cursor,
+                    connection,
+                    run,
+                    capture["final_pallets_produced"],
+                    capture["line_technician"],
+                    None,
+                    captured_at,
+                )
+
+            previously_covered = _last_xray_coverage(cursor, production_run_id)
+            palletised_pallets, last_id = _sum_pallets(cursor, production_run_id, previously_covered)
+            palletised_packs = config.pallets_to_packs(palletised_pallets)
+            covered_to = last_id if last_id is not None else previously_covered
+            total_pallets, _last_id = _sum_pallets(cursor, production_run_id)
+
+            if capture["count_available"]:
+                waste = calc.xray_waste(capture["xray_pack_count"], palletised_packs)
+            else:
+                waste = {
+                    "waste_status": "unavailable",
+                    "post_xray_pack_difference": None,
+                    "estimated_post_xray_waste_percent": None,
+                    "warning": None,
+                }
+
+            # Completing a run is final and cannot be undone from the HMI,
+            # so it must not close on figures that contradict each other
+            # (more packs palletised than the X-ray ever counted). The
+            # whole transaction rolls back - including the final hourly
+            # update inserted above - so the operator goes back, corrects
+            # the input and retries with nothing half-written. The
+            # contract has no Management override today and one is
+            # deliberately not invented here.
+            #
+            # An end-of-shift capture (complete_run=False) is NOT blocked:
+            # it is a mid-run observation, is stored with its warning, and
+            # is already excluded from every waste figure because its
+            # waste_status is not "estimated".
+            if complete_run and waste["waste_status"] == "data_quality_warning":
+                connection.rollback()
+                raise PulseCaptureError(409, waste["warning"])
+
+            cursor.execute(
+                """
+                INSERT INTO public.production_run_xray_counts (
+                    production_run_id, production_line, capture_point, shift,
+                    shift_window_start, line_technician, count_available,
+                    xray_pack_count, unavailable_reason, covered_to_hourly_update_id,
+                    palletised_pallets, palletised_packs, post_xray_pack_difference,
+                    estimated_waste_percent, waste_status, captured_at
+                )
+                VALUES (
+                    %(production_run_id)s, %(production_line)s, %(capture_point)s, %(shift)s,
+                    %(shift_window_start)s, %(line_technician)s, %(count_available)s,
+                    %(xray_pack_count)s, %(unavailable_reason)s, %(covered_to)s,
+                    %(palletised_pallets)s, %(palletised_packs)s, %(difference)s,
+                    %(waste_percent)s, %(waste_status)s, %(captured_at)s
+                )
+                RETURNING id, captured_at;
+                """,
+                {
+                    "production_run_id": production_run_id,
+                    "production_line": run["production_line"],
+                    "capture_point": capture_point,
+                    "shift": shift_name,
+                    "shift_window_start": shift_window.start,
+                    "line_technician": capture["line_technician"],
+                    "count_available": capture["count_available"],
+                    "xray_pack_count": capture["xray_pack_count"],
+                    "unavailable_reason": capture["unavailable_reason"],
+                    "covered_to": covered_to,
+                    "palletised_pallets": calc.for_storage(palletised_pallets),
+                    "palletised_packs": calc.for_storage(palletised_packs),
+                    "difference": calc.for_storage(waste["post_xray_pack_difference"]),
+                    "waste_percent": calc.for_storage(waste["estimated_post_xray_waste_percent"]),
+                    "waste_status": waste["waste_status"],
+                    "captured_at": captured_at,
+                },
+            )
+            saved = cursor.fetchone()
+
+            if complete_run:
+                cursor.execute(
+                    """
+                    UPDATE public.production_runs
+                    SET status = 'Completed', finished_at = %(finished_at)s
+                    WHERE id = %(production_run_id)s AND status = 'Active'
+                    RETURNING id;
+                    """,
+                    {"production_run_id": production_run_id, "finished_at": captured_at},
+                )
+                if cursor.fetchone() is None:
+                    connection.rollback()
+                    raise PulseCaptureError(
+                        409, f"Production Run {production_run_id} is already completed."
+                    )
+
+            result = {
+                "xray_capture_id": saved["id"],
+                "captured_at": saved["captured_at"],
+                "capture_point": capture_point,
+                "production_run_id": production_run_id,
+                "production_line": run["production_line"],
+                "shift": shift_name,
+                "count_available": capture["count_available"],
+                "xray_pack_count": capture["xray_pack_count"],
+                "unavailable_reason": capture["unavailable_reason"],
+                "final_hourly_update": final_update,
+                "total_pallets_recorded": total_pallets,
+                "palletised_pallets": palletised_pallets,
+                "palletised_packs": palletised_packs,
+                "pallets_remaining": run["pallets_remaining"],
+                "total_pallets_completed": run["total_pallets_completed"],
+                "potential_overrun_pallets": run["potential_overrun_pallets"],
+                **waste,
+            }
+            _store_idempotent_response(cursor, idempotency, result)
+
+        connection.commit()
+
+    return result
+
+
+# ----------------------------------------------------------
+# Changeovers (a paired planned stop + QC record)
+# ----------------------------------------------------------
+
+_CHANGEOVER_COLUMNS = """
+    id, production_line, line_technician, shift, status, started_at,
+    completed_at, completed_by, duration_minutes, previous_production_run_id,
+    planned_downtime_event_id, previous_customer, previous_product,
+    previous_pack_weight_kg, previous_format, new_production_run_id,
+    new_customer, new_product, new_pack_weight_kg, new_format, note
+"""
+
+_PLANNED_DOWNTIME_COLUMNS = """
+    id, production_run_id, production_line, reason, started_by, started_at,
+    ended_by, ended_at, duration_minutes
+"""
+
+
+def start_run_changeover(production_run_id, line_technician, new_configuration, note, started_at, idempotency=None):
+    """Start Changeover as ONE transaction: the 'Changeover' planned stop
+    on the run and the structured changeover record are created
+    together, or neither is. The previous configuration is snapshotted
+    from the locked run; the new one is what the technician entered."""
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            _claim_idempotency(cursor, connection, idempotency, production_run_id)
+            run = _lock_active_run(cursor, connection, production_run_id)
+
+            cursor.execute(
+                """
+                SELECT id FROM public.planned_downtime_events
+                WHERE production_run_id = %(production_run_id)s AND ended_at IS NULL;
+                """,
+                {"production_run_id": production_run_id},
+            )
+            if cursor.fetchone() is not None:
+                connection.rollback()
+                raise PulseCaptureError(
+                    409,
+                    "Planned downtime is already in progress for this run. End it before "
+                    "starting a changeover.",
+                )
+
+            cursor.execute(
+                """
+                SELECT id FROM public.changeovers
+                WHERE production_line = %(production_line)s AND status = 'Open'
+                FOR UPDATE;
+                """,
+                {"production_line": run["production_line"]},
+            )
+            if cursor.fetchone() is not None:
+                connection.rollback()
+                raise PulseCaptureError(
+                    409, f"Production Line '{run['production_line']}' already has an open changeover."
+                )
+
+            try:
+                cursor.execute(
+                    f"""
+                    INSERT INTO public.planned_downtime_events (
+                        production_run_id, production_line, reason, started_by, started_at
+                    )
+                    VALUES (
+                        %(production_run_id)s, %(production_line)s, 'Changeover',
+                        %(started_by)s, %(started_at)s
+                    )
+                    RETURNING {_PLANNED_DOWNTIME_COLUMNS};
+                    """,
+                    {
+                        "production_run_id": production_run_id,
+                        "production_line": run["production_line"],
+                        "started_by": line_technician,
+                        "started_at": started_at,
+                    },
+                )
+                planned = cursor.fetchone()
+
+                cursor.execute(
+                    f"""
+                    INSERT INTO public.changeovers (
+                        production_line, line_technician, shift, status, started_at,
+                        previous_production_run_id, planned_downtime_event_id,
+                        previous_customer, previous_product, previous_pack_weight_kg,
+                        previous_format, new_customer, new_product, new_pack_weight_kg,
+                        new_format, note
+                    )
+                    VALUES (
+                        %(production_line)s, %(line_technician)s, %(shift)s, 'Open',
+                        %(started_at)s, %(production_run_id)s, %(planned_id)s,
+                        %(previous_customer)s, %(previous_product)s,
+                        %(previous_pack_weight_kg)s, %(previous_format)s,
+                        %(new_customer)s, %(new_product)s, %(new_pack_weight_kg)s,
+                        %(new_format)s, %(note)s
+                    )
+                    RETURNING {_CHANGEOVER_COLUMNS};
+                    """,
+                    {
+                        **new_configuration,
+                        "production_line": run["production_line"],
+                        "line_technician": line_technician,
+                        "shift": _run_shift_name(run, started_at),
+                        "started_at": started_at,
+                        "production_run_id": production_run_id,
+                        "planned_id": planned["id"],
+                        "previous_customer": run["customer"],
+                        "previous_product": run["product"],
+                        "previous_pack_weight_kg": run["pack_weight_kg"],
+                        "previous_format": run["format"],
+                        "note": note,
+                    },
+                )
+                changeover = cursor.fetchone()
+
+            except psycopg.errors.UniqueViolation:
+                connection.rollback()
+                raise PulseCaptureError(
+                    409, f"Production Line '{run['production_line']}' already has an open changeover."
+                )
+
+            result = {"changeover": changeover, "planned_downtime": planned}
+            _store_idempotent_response(cursor, idempotency, result)
+
+        connection.commit()
+
+    return result
+
+
+def complete_run_changeover(changeover_id, completed_by, note, completed_at, idempotency=None):
+    """Changeover Complete (first ACCEPTABLE packs of the new run) as ONE
+    transaction: the changeover is completed and its paired planned stop
+    is ended together, or neither is."""
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            _claim_idempotency(cursor, connection, idempotency)
+
+            cursor.execute(
+                f"""
+                SELECT {_CHANGEOVER_COLUMNS}
+                FROM public.changeovers
+                WHERE id = %(id)s
+                FOR UPDATE;
+                """,
+                {"id": changeover_id},
+            )
+            changeover = cursor.fetchone()
+
+            if changeover is None:
+                connection.rollback()
+                raise PulseCaptureError(404, f"Changeover {changeover_id} was not found.")
+
+            if changeover["status"] != "Open":
+                connection.rollback()
+                raise PulseCaptureError(409, f"Changeover {changeover_id} is already completed.")
+
+            if completed_at < changeover["started_at"]:
+                connection.rollback()
+                raise PulseCaptureError(409, "A changeover cannot complete before it started.")
+
+            duration = calc.for_storage(calc.duration_minutes(changeover["started_at"], completed_at))
+
+            cursor.execute(
+                f"""
+                UPDATE public.changeovers
+                SET status = 'Completed',
+                    completed_at = %(completed_at)s,
+                    completed_by = %(completed_by)s,
+                    duration_minutes = %(duration_minutes)s,
+                    note = COALESCE(%(note)s, note)
+                WHERE id = %(id)s AND status = 'Open'
+                RETURNING {_CHANGEOVER_COLUMNS};
+                """,
+                {
+                    "id": changeover_id,
+                    "completed_at": completed_at,
+                    "completed_by": completed_by,
+                    "duration_minutes": duration,
+                    "note": note,
+                },
+            )
+            completed = cursor.fetchone()
+
+            cursor.execute(
+                f"""
+                UPDATE public.planned_downtime_events
+                SET ended_at = %(ended_at)s,
+                    ended_by = %(ended_by)s,
+                    duration_minutes = %(duration_minutes)s
+                WHERE id = %(id)s AND ended_at IS NULL
+                RETURNING {_PLANNED_DOWNTIME_COLUMNS};
+                """,
+                {
+                    "id": changeover["planned_downtime_event_id"],
+                    "ended_at": completed_at,
+                    "ended_by": completed_by,
+                    "duration_minutes": duration,
+                },
+            )
+            planned = cursor.fetchone()
+
+            if planned is None:
+                connection.rollback()
+                raise PulseCaptureError(
+                    409,
+                    "This changeover's planned stop was already ended, so the changeover was not "
+                    "completed. Ask a manager to review it.",
+                )
+
+            result = {"changeover": completed, "planned_downtime": planned}
+            _store_idempotent_response(cursor, idempotency, result)
+
+        connection.commit()
+
+    return result
+
+
+def get_open_changeover(production_line):
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                f"""
+                SELECT {_CHANGEOVER_COLUMNS}
+                FROM public.changeovers
+                WHERE production_line = %(production_line)s AND status = 'Open';
+                """,
+                {"production_line": production_line},
+            )
+            return cursor.fetchone()
+
+
+# ----------------------------------------------------------
+# HMI state (active-run recovery)
+# ----------------------------------------------------------
+
+
+def get_hmi_run_state(production_run_id):
+    """Everything the tablet needs to restore a run after a refresh,
+    read from the database - never from local fixtures. None if the run
+    does not exist."""
+    params = {"production_run_id": production_run_id}
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                f"SELECT {_CAPTURE_RUN_COLUMNS} FROM public.production_runs WHERE id = %(production_run_id)s;",
+                params,
+            )
+            run = cursor.fetchone()
+            if run is None:
+                return None
+
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) AS hourly_update_count,
+                    COALESCE(SUM(pallets_completed), 0) AS pallets_recorded,
+                    COALESCE(SUM(expected_packs), 0) AS expected_packs,
+                    MAX(COALESCE(period_ended_at, created_at)) AS last_period_ended_at
+                FROM public.hourly_updates
+                WHERE production_run_id = %(production_run_id)s;
+                """,
+                params,
+            )
+            hourly = cursor.fetchone()
+
+            cursor.execute(
+                f"""
+                SELECT {_PLANNED_DOWNTIME_COLUMNS}
+                FROM public.planned_downtime_events
+                WHERE production_run_id = %(production_run_id)s
+                ORDER BY started_at;
+                """,
+                params,
+            )
+            planned = cursor.fetchall()
+
+            cursor.execute(
+                f"""
+                SELECT {_CHANGEOVER_COLUMNS}
+                FROM public.changeovers
+                WHERE previous_production_run_id = %(production_run_id)s AND status = 'Open';
+                """,
+                params,
+            )
+            open_changeover = cursor.fetchone()
+
+            cursor.execute(
+                """
+                SELECT opened_at, resolved_at, production_status
+                FROM public.downtime_events
+                WHERE production_run_id = %(production_run_id)s;
+                """,
+                params,
+            )
+            faults = cursor.fetchall()
+
+    return {
+        "run": run,
+        "hourly": hourly,
+        "planned": planned,
+        "open_changeover": open_changeover,
+        "faults": faults,
+    }
+
+
+# ----------------------------------------------------------
+# Production run start (idempotent)
+# ----------------------------------------------------------
+
+
+def create_production_run(run, idempotency=None):
+    """Start Run with a server-enforced Idempotency-Key: the key claim,
+    the one-active-run-per-line check and the INSERT share one
+    transaction, so a double tap or a retry after a timeout returns the
+    original run instead of a misleading 'line already active' error."""
+    has_format = run.get("format") is not None
+    format_column = ", format" if has_format else ""
+    format_value = ", %(format)s" if has_format else ""
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            _claim_idempotency(cursor, connection, idempotency)
+
+            cursor.execute(
+                """
+                SELECT id FROM public.production_runs
+                WHERE production_line = %(production_line)s AND status = 'Active'
+                FOR UPDATE;
+                """,
+                {"production_line": run["production_line"]},
+            )
+            if cursor.fetchone() is not None:
+                connection.rollback()
+                raise PulseCaptureError(
+                    409, f"Production Line '{run['production_line']}' already has an active Production Run."
+                )
+
+            try:
+                cursor.execute(
+                    f"""
+                    INSERT INTO public.production_runs (
+                        production_line, line_technician, shift, customer, product,
+                        pack_weight_kg, packs_per_case, pack_type, target_speed_ppm,
+                        cases_per_pallet, starting_pallets_remaining, pallets_remaining,
+                        previous_run_completed{format_column}
+                    )
+                    VALUES (
+                        %(production_line)s, %(line_technician)s, %(shift)s, %(customer)s,
+                        %(product)s, %(pack_weight_kg)s, %(packs_per_case)s, %(pack_type)s,
+                        %(target_speed_ppm)s, %(cases_per_pallet)s,
+                        %(starting_pallets_remaining)s, %(pallets_remaining)s,
+                        %(previous_run_completed)s{format_value}
+                    )
+                    RETURNING id;
+                    """,
+                    run,
+                )
+            except psycopg.errors.UniqueViolation:
+                # idx_unique_active_run_per_line: a different request
+                # started a run on this line at the same moment.
+                connection.rollback()
+                raise PulseCaptureError(
+                    409, f"Production Line '{run['production_line']}' already has an active Production Run."
+                )
+
+            result = {**run, "run_id": cursor.fetchone()["id"]}
+            _store_idempotent_response(cursor, idempotency, result)
+
+        connection.commit()
+
+    return result
+
+
+_CHANGEOVER_TEST_EXCLUSION_SQL = """
+    co.production_line NOT ILIKE 'TEST-%%'
+    AND COALESCE(co.previous_customer, '') NOT ILIKE '%%TEST-%%'
+    AND COALESCE(co.new_customer, '') NOT ILIKE '%%TEST-%%'
+    AND COALESCE(co.previous_product, '') NOT ILIKE '%%TEST-%%'
+    AND COALESCE(co.new_product, '') NOT ILIKE '%%TEST-%%'
+"""
+
+
+def list_changeovers(filters):
+    """filters: started_from / started_to (aware datetimes), production_line,
+    technician, shift, status, customer / product / format / pack_weight_kg
+    (matched against the previous OR new value), min/max_duration_minutes."""
+    conditions = [_CHANGEOVER_TEST_EXCLUSION_SQL]
+    params = {}
+
+    simple = {
+        "production_line": "co.production_line = %(production_line)s",
+        "technician": "co.line_technician = %(technician)s",
+        "shift": "co.shift = %(shift)s",
+        "status": "co.status = %(status)s",
+        "started_from": "co.started_at >= %(started_from)s",
+        "started_to": "co.started_at < %(started_to)s",
+        "min_duration_minutes": "co.duration_minutes >= %(min_duration_minutes)s",
+        "max_duration_minutes": "co.duration_minutes <= %(max_duration_minutes)s",
+    }
+    either = {
+        "customer": ("previous_customer", "new_customer"),
+        "product": ("previous_product", "new_product"),
+        "format": ("previous_format", "new_format"),
+        "pack_weight_kg": ("previous_pack_weight_kg", "new_pack_weight_kg"),
+    }
+
+    for name, sql in simple.items():
+        if filters.get(name) is not None:
+            conditions.append(sql)
+            params[name] = filters[name]
+
+    for name, (previous_column, new_column) in either.items():
+        if filters.get(name) is not None:
+            conditions.append(
+                f"(co.{previous_column} = %({name})s OR co.{new_column} = %({name})s)"
+            )
+            params[name] = filters[name]
+
+    where = " AND ".join(conditions)
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                f"""
+                SELECT {_CHANGEOVER_COLUMNS}
+                FROM public.changeovers AS co
+                WHERE {where}
+                ORDER BY co.started_at DESC;
+                """,
+                params,
+            )
+            return cursor.fetchall()
+
+
+# ----------------------------------------------------------
+# Weekly tonnage targets
+# ----------------------------------------------------------
+
+_TARGET_COLUMNS = "id, week_start, scope, production_line, target_tonnes, set_by, created_at, updated_at"
+
+
+def list_weekly_targets(week_start):
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                f"""
+                SELECT {_TARGET_COLUMNS}
+                FROM public.weekly_tonnage_targets
+                WHERE week_start = %(week_start)s
+                ORDER BY scope DESC, production_line;
+                """,
+                {"week_start": week_start},
+            )
+            return cursor.fetchall()
+
+
+def upsert_weekly_targets(week_start, targets, set_by):
+    """targets: [{"scope", "production_line", "target_tonnes"}]. One
+    transaction; returns [(previous_row_or_None, saved_row)] for the
+    audit log."""
+    results = []
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            for target in targets:
+                cursor.execute(
+                    f"""
+                    SELECT {_TARGET_COLUMNS}
+                    FROM public.weekly_tonnage_targets
+                    WHERE week_start = %(week_start)s
+                      AND scope = %(scope)s
+                      AND COALESCE(production_line, '') = COALESCE(%(production_line)s, '')
+                    FOR UPDATE;
+                    """,
+                    {**target, "week_start": week_start},
+                )
+                previous = cursor.fetchone()
+
+                cursor.execute(
+                    f"""
+                    INSERT INTO public.weekly_tonnage_targets (
+                        week_start, scope, production_line, target_tonnes, set_by
+                    )
+                    VALUES (
+                        %(week_start)s, %(scope)s, %(production_line)s,
+                        %(target_tonnes)s, %(set_by)s
+                    )
+                    ON CONFLICT (week_start, scope, (COALESCE(production_line, '')))
+                    DO UPDATE SET
+                        target_tonnes = EXCLUDED.target_tonnes,
+                        set_by = EXCLUDED.set_by,
+                        updated_at = now()
+                    RETURNING {_TARGET_COLUMNS};
+                    """,
+                    {**target, "week_start": week_start, "set_by": set_by},
+                )
+                results.append((previous, cursor.fetchone()))
+
+        connection.commit()
+
+    return results
+
+
+# ----------------------------------------------------------
+# Protected dashboard reads (window-based)
+# ----------------------------------------------------------
+
+
+def get_dashboard_window_data(window_start, window_end, production_line=None, shift_based=False):
+    """Everything the window-based dashboard calculations need, in one
+    connection.
+
+    Hourly output membership:
+      - shift_based (current shift, factory day, production week): by the
+        update's operational shift instance (hourly_updates.
+        shift_window_start - the run's recorded shift), so a period
+        ending exactly at 06:00/14:00/22:00, or crossing a boundary, stays
+        with the shift that produced it;
+      - otherwise (rolling 24h): by period end, end-inclusive.
+    Downtime is fetched across the window AND the full span of the
+    included periods (`attribution_bounds`), so a boundary-crossing
+    period's own downtime is available for attribution. Legacy rows with
+    no timestamp cannot be placed in any window and are only counted."""
+    base = [_TEST_DATA_EXCLUSION_SQL]
+    params = {"window_start": window_start, "window_end": window_end}
+
+    if production_line is not None:
+        base.append("pr.production_line = %(production_line)s")
+        params["production_line"] = production_line
+
+    run_where = " AND ".join(
+        base
+        + [
+            "pr.started_at < %(window_end)s",
+            "(pr.finished_at IS NULL OR pr.finished_at > %(window_start)s)",
+        ]
+    )
+    base_where = " AND ".join(base)
+    membership = (
+        "hu.shift_window_start >= %(window_start)s AND hu.shift_window_start < %(window_end)s"
+        if shift_based
+        else "hu.period_ended_at > %(window_start)s AND hu.period_ended_at <= %(window_end)s"
+    )
+
+    with get_database_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                """
+                SELECT name FROM public.production_lines
+                WHERE active = TRUE
+                ORDER BY display_order, name;
+                """
+            )
+            lines = [row["name"] for row in cursor.fetchall()]
+
+            cursor.execute(
+                f"""
+                SELECT
+                    hu.id, hu.production_run_id, hu.expected_packs,
+                    hu.pallets_completed AS actual_pallets, hu.period_started_at,
+                    hu.period_ended_at, hu.created_at, hu.shift, hu.shift_window_start,
+                    hu.other_loss_reason, hu.unexplained_loss_reason
+                FROM public.hourly_updates AS hu
+                JOIN public.production_runs AS pr ON pr.id = hu.production_run_id
+                WHERE {base_where}
+                  AND {membership}
+                ORDER BY hu.id;
+                """,
+                params,
+            )
+            hourly = cursor.fetchall()
+
+            params["hourly_run_ids"] = sorted({row["production_run_id"] for row in hourly})
+            if shift_based and hourly:
+                params["fetch_start"] = min([window_start] + [r["period_started_at"] for r in hourly])
+                params["fetch_end"] = max([window_end] + [r["period_ended_at"] for r in hourly])
+            else:
+                params["fetch_start"] = window_start
+                params["fetch_end"] = window_end
+
+            cursor.execute(
+                f"""
+                SELECT
+                    pr.id, pr.production_line, pr.line_technician, pr.shift,
+                    pr.customer, pr.product, pr.format, pr.pack_weight_kg,
+                    pr.packs_per_case, pr.cases_per_pallet, pr.target_speed_ppm,
+                    pr.status, pr.started_at, pr.finished_at,
+                    pr.pallets_remaining, pr.total_pallets_completed
+                FROM public.production_runs AS pr
+                WHERE ({run_where})
+                   OR ({base_where} AND pr.status = 'Active')
+                   OR ({base_where} AND pr.id = ANY(%(hourly_run_ids)s))
+                ORDER BY pr.started_at;
+                """,
+                params,
+            )
+            runs = cursor.fetchall()
+
+            cursor.execute(
+                f"""
+                SELECT COUNT(*) AS legacy_count
+                FROM public.hourly_updates AS hu
+                JOIN public.production_runs AS pr ON pr.id = hu.production_run_id
+                WHERE {run_where} AND hu.period_ended_at IS NULL;
+                """,
+                params,
+            )
+            legacy_count = cursor.fetchone()["legacy_count"]
+
+            cursor.execute(
+                f"""
+                SELECT pde.id, pde.production_run_id, pde.reason,
+                       pde.started_at, pde.ended_at
+                FROM public.planned_downtime_events AS pde
+                JOIN public.production_runs AS pr ON pr.id = pde.production_run_id
+                WHERE {base_where}
+                  AND pde.started_at < %(fetch_end)s
+                  AND (pde.ended_at IS NULL OR pde.ended_at > %(fetch_start)s);
+                """,
+                params,
+            )
+            planned = cursor.fetchall()
+
+            cursor.execute(
+                f"""
+                SELECT
+                    de.id, de.production_run_id, pr.production_line, de.fault_id,
+                    de.machine, de.machine_id, de.reason, de.production_status,
+                    de.engineering_status, de.engineer, de.opened_at,
+                    de.resolved_at, de.maintenance_preventable,
+                    (
+                        SELECT eu.repair_classification
+                        FROM public.engineering_updates AS eu
+                        WHERE eu.downtime_event_id = de.id
+                          AND eu.repair_classification IS NOT NULL
+                        ORDER BY eu.id DESC
+                        LIMIT 1
+                    ) AS repair_classification
+                FROM public.downtime_events AS de
+                JOIN public.production_runs AS pr ON pr.id = de.production_run_id
+                WHERE {base_where}
+                  AND de.opened_at < %(fetch_end)s
+                  AND (de.resolved_at IS NULL OR de.resolved_at > %(fetch_start)s);
+                """,
+                params,
+            )
+            faults = cursor.fetchall()
+
+            cursor.execute(
+                f"""
+                SELECT
+                    x.id, x.production_run_id, x.production_line, x.capture_point,
+                    x.shift, x.count_available, x.xray_pack_count,
+                    x.unavailable_reason, x.palletised_packs,
+                    x.post_xray_pack_difference, x.estimated_waste_percent,
+                    x.waste_status, x.captured_at
+                FROM public.production_run_xray_counts AS x
+                JOIN public.production_runs AS pr ON pr.id = x.production_run_id
+                WHERE {base_where}
+                  AND x.captured_at >= %(window_start)s
+                  AND x.captured_at < %(window_end)s
+                ORDER BY x.captured_at;
+                """,
+                params,
+            )
+            xray = cursor.fetchall()
+
+            cursor.execute(
+                f"""
+                SELECT activity.production_line, MAX(activity.at) AS latest_activity_at
+                FROM (
+                    SELECT pr.production_line, GREATEST(pr.started_at, pr.finished_at) AS at
+                    FROM public.production_runs AS pr WHERE {base_where}
+                    UNION ALL
+                    SELECT pr.production_line, hu.created_at
+                    FROM public.hourly_updates AS hu
+                    JOIN public.production_runs AS pr ON pr.id = hu.production_run_id
+                    WHERE {base_where}
+                    UNION ALL
+                    SELECT pr.production_line,
+                           GREATEST(de.opened_at, de.accepted_at, de.resolved_at)
+                    FROM public.downtime_events AS de
+                    JOIN public.production_runs AS pr ON pr.id = de.production_run_id
+                    WHERE {base_where}
+                    UNION ALL
+                    SELECT pr.production_line, eu.created_at
+                    FROM public.engineering_updates AS eu
+                    JOIN public.production_runs AS pr ON pr.id = eu.production_run_id
+                    WHERE {base_where}
+                    UNION ALL
+                    SELECT pr.production_line, GREATEST(pde.started_at, pde.ended_at)
+                    FROM public.planned_downtime_events AS pde
+                    JOIN public.production_runs AS pr ON pr.id = pde.production_run_id
+                    WHERE {base_where}
+                    UNION ALL
+                    SELECT pr.production_line, x.captured_at
+                    FROM public.production_run_xray_counts AS x
+                    JOIN public.production_runs AS pr ON pr.id = x.production_run_id
+                    WHERE {base_where}
+                ) AS activity
+                WHERE activity.at IS NOT NULL
+                GROUP BY activity.production_line;
+                """,
+                params,
+            )
+            latest_activity = {
+                row["production_line"]: row["latest_activity_at"] for row in cursor.fetchall()
+            }
+
+            cursor.execute(
+                f"""
+                SELECT pr.production_line, MAX(hu.created_at) AS last_hourly_update_at
+                FROM public.hourly_updates AS hu
+                JOIN public.production_runs AS pr ON pr.id = hu.production_run_id
+                WHERE {base_where}
+                GROUP BY pr.production_line;
+                """,
+                params,
+            )
+            last_hourly = {
+                row["production_line"]: row["last_hourly_update_at"] for row in cursor.fetchall()
+            }
+
+    return {
+        "lines": lines,
+        "runs": runs,
+        "hourly": hourly,
+        "attribution_bounds": (params["fetch_start"], params["fetch_end"]),
+        "legacy_hourly_without_timestamp": legacy_count,
+        "planned": planned,
+        "faults": faults,
+        "xray": xray,
+        "latest_activity": latest_activity,
+        "last_hourly": last_hourly,
+    }

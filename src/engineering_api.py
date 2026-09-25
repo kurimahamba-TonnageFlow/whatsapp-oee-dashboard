@@ -460,6 +460,12 @@ def add_update(
 # ==========================================================
 
 
+class CloseFaultRequest(RepairUpdateRequest):
+    # "Could this fault have been prevented by planned maintenance?" -
+    # required at closure, recorded on the fault itself, never inferred.
+    maintenance_preventable: Literal["Yes", "No", "Unsure"]
+
+
 class EngineeringCloseResponse(BaseModel):
     status: str
     downtime_event_id: int
@@ -467,12 +473,13 @@ class EngineeringCloseResponse(BaseModel):
     engineering_status: str
     production_status: str
     resolved_at: datetime | None
+    maintenance_preventable: str | None
 
 
 @router.post("/faults/{downtime_event_id}/close", response_model=EngineeringCloseResponse)
 def close_fault(
     downtime_event_id: int,
-    payload: RepairUpdateRequest,
+    payload: CloseFaultRequest,
     engineer_name: str = Depends(engineering_auth.require_engineering_session),
 ):
     fault = _load_owned_open_fault(downtime_event_id, engineer_name)
@@ -490,6 +497,7 @@ def close_fault(
         "new_value": payload.new_value,
         "reason_for_change": payload.reason_for_change,
         "affected_products_or_formats": payload.affected_products_or_formats,
+        "maintenance_preventable": payload.maintenance_preventable,
     }
 
     closed = _safe_db_call(
@@ -513,6 +521,7 @@ def close_fault(
         engineering_status=closed["engineering_status"],
         production_status=closed["production_status"],
         resolved_at=closed["resolved_at"],
+        maintenance_preventable=closed.get("maintenance_preventable"),
     )
 
 
