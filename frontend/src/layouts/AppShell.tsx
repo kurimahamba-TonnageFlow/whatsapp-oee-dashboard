@@ -2,10 +2,12 @@ import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import { ApiStatus } from '../components/ApiStatus'
 
-const NAV_ITEMS = [
+const NAV_ITEMS: ReadonlyArray<{ to: string; label: string; end?: boolean }> = [
   { to: '/hmi', label: 'HMI' },
   { to: '/engineering', label: 'Engineering' },
-  { to: '/management', label: 'Management' },
+  // `end`: Management is active only on /management itself, not also on
+  // /management/performance (which has its own nav item).
+  { to: '/management', label: 'Management', end: true },
   { to: '/management/performance', label: 'Performance' },
   { to: '/dashboard', label: 'Dashboard' },
 ]
@@ -30,6 +32,7 @@ export function AppShell({ children }: AppShellProps) {
           <NavLink
             key={item.to}
             to={item.to}
+            end={item.end}
             className={({ isActive }) =>
               isActive
                 ? 'app-shell__nav-link app-shell__nav-link--active'

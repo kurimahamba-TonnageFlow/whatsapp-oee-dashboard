@@ -1,23 +1,72 @@
 /*
-  Tonnage Flow Pulse design tokens.
-  Foundation-only palette - not the final HMI visual design, just a
-  consistent base for this stage's placeholder pages.
+  Tonnage Flow Pulse design tokens - the ONE source for every screen:
+  the four management dashboards, the Line Technician HMI, the
+  Engineering workspace and the Management area.
+
+  Values are the management dashboard's dark palette (the design
+  reference - see features/dashboard/ui/dashboard-theme.css, whose --pd-*
+  variables now point here). Each page keeps its own layout and density,
+  but takes every colour, radius, font and control size from here.
+
+  Contrast (WCAG 2.2 AA) was checked for every text/fill pair below:
+    text on surfaces            >= 12:1   muted text on surfaces  >= 7:1
+    brand / status text colours on surfaces >= 5:1
+    white on the status fills and on --pulse-color-primary >= 5.6:1
 */
 :root {
-  /* Colour */
-  --pulse-color-bg: #f5f6f8;
-  --pulse-color-surface: #ffffff;
-  --pulse-color-text: #1a1b1f;
-  --pulse-color-text-muted: #5b5d66;
-  --pulse-color-border: #d7d9e0;
-  --pulse-color-primary: #1d5fd6;
+  color-scheme: dark;
+
+  /* ---- Surfaces ---- */
+  --pulse-color-bg: #0f1416;
+  --pulse-color-surface: #1b2123;
+  --pulse-color-surface-2: #202627;
+  --pulse-color-surface-3: #252b2c;
+  --pulse-color-input-bg: #1d2224;
+  --pulse-color-hover: #2a3431;
+  --pulse-color-border: #353c39;
+  --pulse-color-border-strong: #444c49;
+
+  /* ---- Text ---- */
+  --pulse-color-text: #f3f5f3;
+  --pulse-color-text-2: #d0d4d1;
+  --pulse-color-text-muted: #aeb7b1;
+
+  /* ---- Brand and actions ---- */
+  --pulse-color-brand: #6fb340; /* accent marks, active edges, links */
+  --pulse-color-brand-strong: #478827;
+  --pulse-color-primary: #3d7520; /* filled primary action (white text 5.6:1) */
+  --pulse-color-primary-hover: #44801f; /* white text 4.8:1 */
   --pulse-color-primary-contrast: #ffffff;
-  --pulse-color-success: #157a45;
-  --pulse-color-warning: #a5680a;
-  --pulse-color-danger: #c22f2f;
   --pulse-color-focus: #ffb000;
 
-  /* Spacing */
+  /* ---- Status: text and icons on dark surfaces ---- */
+  --pulse-color-success: #7cc44c;
+  --pulse-color-warning: #ffc04c;
+  --pulse-color-danger: #fa6960;
+  --pulse-color-info: #7fa2e6;
+
+  /* ---- Status: solid fills for badges, pills and buttons (white text) ---- */
+  --pulse-fill-good: #265b39;
+  --pulse-fill-warn: #7d5a14;
+  --pulse-fill-bad: #9d3036;
+  --pulse-fill-info: #2c4a80;
+  --pulse-fill-neutral: #3a4341;
+
+  /* ---- Status: soft tints for notices and alerts ---- */
+  --pulse-tint-good: rgb(124 196 76 / 0.14);
+  --pulse-tint-warn: rgb(255 192 76 / 0.14);
+  --pulse-tint-bad: rgb(250 105 96 / 0.14);
+  --pulse-tint-info: rgb(127 162 230 / 0.16);
+
+  /* ---- Chart series (validated on --pulse-color-surface) ---- */
+  --pulse-series-target: #6b8fd8;
+  --pulse-series-actual: #5fa83a;
+  --pulse-series-planned: #d99a2b;
+  --pulse-series-unplanned: #e0564d;
+  --pulse-series-other: #9a84d6;
+  --pulse-series-unexplained: #6d7773;
+
+  /* ---- Spacing ---- */
   --pulse-space-1: 4px;
   --pulse-space-2: 8px;
   --pulse-space-3: 12px;
@@ -26,20 +75,25 @@
   --pulse-space-6: 32px;
   --pulse-space-7: 48px;
 
-  /* Typography */
+  /* ---- Typography ---- */
   --pulse-font-family:
     system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --pulse-font-size-xs: 0.75rem;
   --pulse-font-size-sm: 0.875rem;
   --pulse-font-size-base: 1rem;
   --pulse-font-size-lg: 1.25rem;
   --pulse-font-size-xl: 1.75rem;
   --pulse-line-height: 1.5;
+  --pulse-heading-tracking: 0.04em;
 
-  /* Touch targets - WCAG 2.5.5 / factory-tablet friendly minimum */
-  --pulse-touch-target-min: 44px;
+  /* ---- Touch targets ---- */
+  --pulse-touch-target-min: 44px; /* every control (WCAG 2.5.5) */
+  --pulse-touch-target-hmi: 56px; /* factory-tablet actions: HMI and Engineering */
+  --pulse-control-height: 44px; /* inputs, selects, standard buttons */
 
-  /* Border radius */
+  /* ---- Shape ---- */
   --pulse-radius-sm: 4px;
-  --pulse-radius-md: 8px;
-  --pulse-radius-lg: 16px;
+  --pulse-radius-md: 6px;
+  --pulse-radius-lg: 8px;
+  --pulse-radius-pill: 999px;
 }

@@ -21,6 +21,9 @@ interface HomeScreenProps {
   onRetryLineState: () => void
   onStartRun: (lineName: string) => void
   onOpenActiveRun: (runId: number, lineName: string) => void
+  /** Opens the Changeover / Other timer running between runs. */
+  onOpenStoppage?: (line: HmiLineState) => void
+  onChooseNextStep?: (line: HmiLineState) => void
   onEngineering: () => void
   onManagement: () => void
 }
@@ -45,6 +48,8 @@ export function HomeScreen({
   onRetryLineState,
   onStartRun,
   onOpenActiveRun,
+  onOpenStoppage,
+  onChooseNextStep,
   onEngineering,
   onManagement,
 }: HomeScreenProps) {
@@ -126,7 +131,47 @@ export function HomeScreen({
                     <StatusPill tone="grey">Status unavailable</StatusPill>
                   )}
 
-                  {isKnown && !isActive && <StatusPill tone="green">Available</StatusPill>}
+                  {isKnown && !isActive && state.open_stoppage && (
+                    <>
+                      <StatusPill tone={state.open_stoppage.kind === 'not_scheduled' ? 'grey' : 'amber'}>
+                        {stoppageLabel(state.open_stoppage)}
+                      </StatusPill>
+                      <p className="hmi-line-card__detail">
+                        {state.open_stoppage.kind === 'other' && state.open_stoppage.reason
+                          ? `${state.open_stoppage.reason} · `
+                          : ''}
+                        {state.open_stoppage.kind === 'restart_delay' && state.open_stoppage.reason
+                          ? `After: ${state.open_stoppage.reason} · `
+                          : ''}
+                        {state.open_stoppage.kind === 'handover' && state.open_stoppage.started_by
+                          ? `Handed over by ${state.open_stoppage.started_by} · `
+                          : ''}
+                        {state.open_stoppage.elapsed_minutes !== null &&
+                          `${Math.round(state.open_stoppage.elapsed_minutes)} min so far`}
+                      </p>
+                    </>
+                  )}
+
+                  {isKnown && !isActive && !state.open_stoppage && state.awaiting_next_step && (
+                    <>
+                      <StatusPill tone="amber">Run ended — next step not chosen</StatusPill>
+                      <p className="hmi-line-card__detail">
+                        Choose End Shift, Changeover, Not scheduled or Other so the gap is recorded.
+                      </p>
+                    </>
+                  )}
+
+                  {isKnown && !isActive && !state.open_stoppage && !state.awaiting_next_step && (
+                    <StatusPill tone="green">Available</StatusPill>
+                  )}
+
+                  {isKnown && !isActive && (state.line_open_fault_count ?? 0) > 0 && (
+                    <StatusPill tone="red">
+                      {state.line_open_fault_count === 1
+                        ? '1 open fault to acknowledge'
+                        : `${state.line_open_fault_count} open faults to acknowledge`}
+                    </StatusPill>
+                  )}
 
                   {isActive && (
                     <>
@@ -163,6 +208,25 @@ export function HomeScreen({
                     >
                       {isOpening ? 'Opening…' : 'Open Active Run'}
                     </button>
+                  ) : isKnown &&
+                    (state.open_stoppage?.kind === 'handover' ||
+                      state.open_stoppage?.kind === 'restart_delay' ||
+                      state.open_stoppage?.kind === 'not_scheduled') ? (
+                    <button type="button" onClick={() => onStartRun(line.name)}>
+                      Start Run
+                    </button>
+                  ) : isKnown && state.open_stoppage?.kind === 'changeover' && state.open_stoppage.physical_ended_at ? (
+                    <button type="button" onClick={() => onStartRun(line.name)}>
+                      Enter New Run Details
+                    </button>
+                  ) : isKnown && state.open_stoppage && onOpenStoppage ? (
+                    <button type="button" onClick={() => onOpenStoppage(state)}>
+                      {state.open_stoppage.kind === 'changeover' ? 'Open Changeover' : 'Open Line Stop'}
+                    </button>
+                  ) : isKnown && state.awaiting_next_step && onChooseNextStep ? (
+                    <button type="button" onClick={() => onChooseNextStep(state)}>
+                      Choose Next Step
+                    </button>
                   ) : (
                     <button type="button" onClick={() => onStartRun(line.name)} disabled={!isKnown}>
                       Start Run
@@ -185,4 +249,14 @@ export function HomeScreen({
       </footer>
     </div>
   )
+}
+
+function stoppageLabel(stop: NonNullable<HmiLineState['open_stoppage']>): string {
+  if (stop.kind === 'handover') return 'Shift handover'
+  if (stop.kind === 'restart_delay') return 'Restart delay'
+  if (stop.kind === 'not_scheduled') return 'Not scheduled'
+  if (stop.kind === 'changeover') {
+    return stop.physical_ended_at ? 'Changeover — new-run setup' : 'Changeover in progress'
+  }
+  return 'Line stopped'
 }

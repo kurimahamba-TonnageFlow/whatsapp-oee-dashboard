@@ -58,6 +58,8 @@ async function request<T>(
     headers['Idempotency-Key'] = options.idempotencyKey
   }
 
+  const tabletToken = sessionStorage.getItem('pulse.tablet.session')
+  if (tabletToken) headers['X-HMI-Session'] = tabletToken
   let response: Response
   try {
     response = await fetch(joinUrl(getApiBaseUrl(), path), {
@@ -77,6 +79,10 @@ async function request<T>(
     data = null
   }
 
+  if (response.status === 401 && tabletToken && !options.token && extractDetail(data)?.includes('Tablet sign-in required')) {
+    sessionStorage.removeItem('pulse.tablet.session')
+    window.dispatchEvent(new Event('pulse-tablet-expired'))
+  }
   if (!response.ok) {
     throw new ApiRequestError(
       response.status,

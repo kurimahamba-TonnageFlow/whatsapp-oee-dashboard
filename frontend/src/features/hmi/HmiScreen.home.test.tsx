@@ -207,7 +207,7 @@ describe('Home line availability across devices', () => {
 
     await waitFor(() => expect(hmiApi.getRunState).toHaveBeenCalledWith(99))
     // The Active Run screen, driven entirely by the backend response.
-    expect(await screen.findByRole('button', { name: /hourly update/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /report hour/i })).toBeInTheDocument()
     // Only now is the run adopted by this device.
     expect(window.localStorage.length).toBeGreaterThan(0)
   })

@@ -26,3 +26,10 @@ ENGINEERS = (
     "Kuri",
     "Alfie",
 )
+
+try:
+    from .catalogue import CATALOGUE
+except ImportError:
+    from catalogue import CATALOGUE
+PRODUCTS = tuple(CATALOGUE["products"])
+CUSTOMERS = tuple(CATALOGUE["customers"])

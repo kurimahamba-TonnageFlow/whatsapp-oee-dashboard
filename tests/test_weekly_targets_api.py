@@ -92,12 +92,11 @@ def test_set_site_and_all_three_line_targets_with_audit(client, audit, monkeypat
     assert body["week"]["end"] == "2026-01-19T06:00:00+00:00"
     assert len(body["targets"]) == 4
 
-    assert len(audit) == 4
-    assert audit[0]["action"] == "set_weekly_tonnage_target"
-    assert audit[0]["record_id"] == "2026-01-12:site:site"
-    assert audit[0]["previous_value"]["target_tonnes"] == 350.0
-    assert audit[1]["previous_value"] is None
-    assert audit[1]["record_id"] == "2026-01-12:line:Rovema"
+    # The DB helper owns the audit in the same transaction as the write.
+    # API must pass the authenticated actor and must not create a second audit.
+    assert received["set_by"] == "Kuri"
+    assert audit == []
+
 
 
 def test_week_defaults_to_the_current_production_week(client, audit, monkeypatch):

@@ -190,6 +190,17 @@ def test_login_with_incorrect_pin_returns_401():
     assert response.status_code == 401
 
 
+def test_login_with_a_non_ascii_pin_is_a_normal_wrong_pin_not_a_crash():
+    # Regression: hmac.compare_digest raises TypeError on non-ASCII str,
+    # which surfaced as a 500 instead of a 401.
+    response = client.post(
+        "/api/v1/engineering/login",
+        json={"pin": "éééé", "engineer_name": "Alfie"},
+    )
+
+    assert response.status_code == 401
+
+
 def test_login_rejects_unknown_engineer():
     response = client.post(
         "/api/v1/engineering/login",
@@ -485,7 +496,7 @@ def test_accept_resolved_fault_returns_409(monkeypatch):
     monkeypatch.setattr(
         engineering_api,
         "get_downtime_event_by_id",
-        lambda downtime_event_id: _downtime_event_row(production_status="Resolved"),
+        lambda downtime_event_id: _downtime_event_row(production_status="Resolved", engineering_status="Resolved"),
     )
 
     response = client.post("/api/v1/engineering/faults/12/accept", headers=_auth_headers(token))
@@ -701,7 +712,7 @@ def test_update_resolved_fault_returns_409(monkeypatch):
     monkeypatch.setattr(
         engineering_api,
         "get_downtime_event_by_id",
-        lambda downtime_event_id: _downtime_event_row(production_status="Resolved"),
+        lambda downtime_event_id: _downtime_event_row(production_status="Resolved", engineering_status="Resolved"),
     )
 
     response = client.post(
@@ -833,7 +844,7 @@ def test_close_already_resolved_fault_returns_409(monkeypatch):
     monkeypatch.setattr(
         engineering_api,
         "get_downtime_event_by_id",
-        lambda downtime_event_id: _downtime_event_row(production_status="Resolved"),
+        lambda downtime_event_id: _downtime_event_row(production_status="Resolved", engineering_status="Resolved"),
     )
 
     response = client.post(
@@ -852,7 +863,7 @@ def test_close_duplicate_does_not_call_database_twice(monkeypatch):
     state = {"status": "Ongoing"}
 
     def fake_get_downtime_event(downtime_event_id):
-        return _downtime_event_row(production_status=state["status"])
+        return _downtime_event_row(engineering_status=state["status"])
 
     def fake_close(downtime_event_id, repair_update, resolved_at):
         calls.append(1)
@@ -1068,7 +1079,7 @@ def test_handover_resolved_fault_returns_409(monkeypatch):
     monkeypatch.setattr(
         engineering_api,
         "get_downtime_event_by_id",
-        lambda downtime_event_id: _downtime_event_row(production_status="Resolved"),
+        lambda downtime_event_id: _downtime_event_row(production_status="Resolved", engineering_status="Resolved"),
     )
 
     response = client.post(
@@ -1419,7 +1430,7 @@ def test_hand_over_engineering_fault_query_is_guarded():
     # Ownership, production status, engineering status, and genuine
     # acceptance are all required by the guarded UPDATE's WHERE clause.
     source = inspect.getsource(database.hand_over_engineering_fault)
-    assert "production_status = 'Ongoing'" in source
+    assert "AND production_status =" not in source
     assert "engineering_status = 'Ongoing'" in source
     assert "engineer = %(engineer)s" in source
     assert "accepted_at IS NOT NULL" in source
@@ -1516,7 +1527,7 @@ def test_get_engineering_faults_query_has_valid_psycopg_placeholder_syntax(monke
 
 def test_accept_engineering_fault_query_is_guarded():
     source = inspect.getsource(database.accept_engineering_fault)
-    assert "production_status = 'Ongoing'" in source
+    assert "engineering_status <> 'Resolved'" in source
     assert "engineer IS NULL OR engineer = %(engineer)s" in source
 
 
@@ -1538,7 +1549,7 @@ def test_accept_engineering_fault_writes_ongoing_not_investigating(monkeypatch):
 
 def test_close_engineering_fault_query_is_guarded():
     source = inspect.getsource(database.close_engineering_fault)
-    assert "production_status = 'Ongoing'" in source
+    assert "engineering_status <> 'Resolved'" in source
 
 
 def test_close_engineering_fault_writes_maintenance_preventability_in_the_guarded_update(monkeypatch):
@@ -1552,7 +1563,7 @@ def test_close_engineering_fault_writes_maintenance_preventability_in_the_guarde
 
     update_query, update_params = fake_connection._cursor.calls[1]
     assert "maintenance_preventable = %(maintenance_preventable)s" in update_query
-    assert "production_status = 'Ongoing'" in update_query
+    assert "engineering_status <> 'Resolved'" in update_query
     assert update_params["maintenance_preventable"] == "Unsure"
 
 
@@ -1691,3 +1702,73 @@ def test_all_engineering_routes_are_registered():
         "/api/v1/engineering/faults/{downtime_event_id}/handover",
     ]:
         assert expected in paths, f"missing route: {expected}"
+
+
+def test_restored_production_can_still_receive_engineering_updates(monkeypatch):
+    token = _login()
+    monkeypatch.setattr(engineering_api, "get_downtime_event_by_id", lambda _: _downtime_event_row(production_status="Resolved", resolved_at=_dt(10)))
+    monkeypatch.setattr(engineering_api, "add_engineering_repair_update", lambda *args: {"id": 90, "created_at": _dt(60)})
+    payload = {"classification": "Mechanical", "finding": "Worn guide", "action": "Replaced guide"}
+    response = client.post("/api/v1/engineering/faults/12/updates", json=payload, headers=_auth_headers(token))
+    assert response.status_code == 200
+
+
+def test_engineering_close_preserves_production_restart_time(monkeypatch):
+    closed = _downtime_event_row(production_status="Resolved", engineering_status="Resolved", resolved_at=_dt(10))
+    connection = _FakeConnection(results=[{"id": 99}, closed])
+    monkeypatch.setattr(database, "get_database_connection", lambda: connection)
+    result = database.close_engineering_fault(12, REPAIR_UPDATE_FIXTURE, _dt(60))
+    query, params = connection._cursor.calls[1]
+    assignments = query.split("SET", 1)[1].split("WHERE", 1)[0]
+    assert "resolved_at" not in assignments
+    assert "production_status" not in assignments
+    assert "AND engineer = %(engineer)s" in query
+    assert "AND engineering_status <> 'Resolved'" in query
+    assert params["engineer"] == REPAIR_UPDATE_FIXTURE["engineer"]
+    assert result["resolved_at"] == _dt(10)
+
+
+def test_update_losing_ownership_race_returns_conflict(monkeypatch):
+    monkeypatch.setattr(engineering_api, "get_downtime_event_by_id", lambda *args: _downtime_event_row())
+    monkeypatch.setattr(engineering_api, "add_engineering_repair_update", lambda *args: None)
+    response = client.post('/api/v1/engineering/faults/12/updates',
+                           json=MECHANICAL_PAYLOAD, headers=_auth_headers(_login()))
+    assert response.status_code == 409
+    assert 'Refresh' in response.json()['detail']
+
+
+def test_update_guard_miss_returns_none_without_insert(monkeypatch):
+    connection = _FakeConnection(results=[None])
+    monkeypatch.setattr(database, 'get_database_connection', lambda: connection)
+    assert database.add_engineering_repair_update(12, REPAIR_UPDATE_FIXTURE) is None
+
+
+def test_engineering_list_includes_technician_report(monkeypatch):
+    row = _fault_row(report_note='Section: Pack folding. Guide catches the pack.')
+    monkeypatch.setattr(engineering_api, 'get_engineering_faults', lambda *args: [row])
+    response = client.get('/api/v1/engineering/faults', headers=_auth_headers(_login()))
+    assert response.status_code == 200
+    assert response.json()['items'][0]['report_note'] == row['report_note']
+
+
+@pytest.mark.parametrize('route,action,payload', [
+    ('accept','accept',{}),
+    ('updates','update',MECHANICAL_PAYLOAD),
+    ('close','close',{**MECHANICAL_PAYLOAD,'maintenance_preventable':'Unsure'}),
+    ('handover','handover',{'note':'Next shift must check guide'}),
+])
+def test_keyed_actions_use_authenticated_actor_before_current_state_checks(monkeypatch,route,action,payload):
+    calls=[]
+    def save(*args,idempotency):
+        calls.append((args,idempotency))
+        return {'status':'success','downtime_event_id':12}
+    monkeypatch.setattr(engineering_api,'act_on_engineering_fault',save)
+    def forbidden(*args):
+        raise AssertionError('Replay must be checked before current ownership')
+    monkeypatch.setattr(engineering_api,'get_downtime_event_by_id',forbidden)
+    headers={**_auth_headers(_login()),'Idempotency-Key':'engineering-keyed-test-001'}
+    response=client.post(f'/api/v1/engineering/faults/12/{route}',json={**payload,'engineer':'Aaron'},headers=headers)
+    assert response.status_code==200
+    assert calls[0][0][:3]==(12,action,'Alfie')
+    assert calls[0][1].action==f'engineering:12:Alfie:{action}'
+    assert 'engineer' not in calls[0][0][3]

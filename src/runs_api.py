@@ -64,7 +64,7 @@ class StartRunRequest(BaseModel):
     pack_weight_kg: float = Field(gt=0)
     packs_per_case: int = Field(ge=1)
     pack_type: str
-    target_speed_ppm: float = Field(gt=0)
+    target_speed_ppm: float | None = Field(default=None, gt=0)  # Legacy input ignored; management owns baseline.
     cases_per_pallet: int = Field(ge=1)
     pallets_remaining: int = Field(ge=0)
     previous_run_completed: int = Field(ge=0)
@@ -134,6 +134,8 @@ def _start_run_response(result):
         "status": "success",
         "message": "Run started",
         "run_id": result["run_id"],
+        "standard_speed_ppm": result.get("standard_speed_ppm"),
+        "standard_version_id": result.get("standard_version_id"),
         "production_line": result["production_line"],
         "line_technician": result["line_technician"],
         "pallets_remaining": result["pallets_remaining"],

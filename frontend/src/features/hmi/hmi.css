@@ -1,30 +1,29 @@
 /*
-  Operator HMI theme. No visual reference for "the established
-  Tonnage Flow dark style" was ever supplied in this project (frontend
-  source has never existed in this repo) - this is a considered,
-  high-contrast dark theme built for factory-tablet use, not a
-  verified match to a real design. Scoped under .hmi-screen so the
-  rest of the app (Engineering/Management/Dashboard placeholders)
-  keeps the light Stage-3 foundation theme.
+  Line Technician HMI. Every colour, radius and size comes from the
+  shared tokens (src/styles/tokens.css - the management dashboard's
+  palette); this file only sets the factory-tablet layout: 56px actions,
+  96px End Run choices, large readable status and timers.
 */
 
 .hmi-screen {
-  --hmi-bg: #12141a;
-  --hmi-surface: #1c1f28;
-  --hmi-surface-raised: #262a35;
-  --hmi-border: #3a3f4d;
-  --hmi-text: #f4f5f7;
-  --hmi-text-muted: #a6acbb;
-  --hmi-accent: #4c8dff;
-  --hmi-success: #33c17a;
-  --hmi-warning: #f0ad3d;
-  --hmi-danger: #f0554f;
-  --hmi-focus: #ffd23f;
+  --hmi-bg: var(--pulse-color-bg);
+  --hmi-surface: var(--pulse-color-surface);
+  --hmi-surface-raised: var(--pulse-color-surface-3);
+  --hmi-border: var(--pulse-color-border-strong);
+  --hmi-text: var(--pulse-color-text);
+  --hmi-text-muted: var(--pulse-color-text-muted);
+  --hmi-accent: var(--pulse-color-brand);
+  --hmi-success: var(--pulse-color-success);
+  --hmi-warning: var(--pulse-color-warning);
+  --hmi-danger: var(--pulse-color-danger);
+  --hmi-focus: var(--pulse-color-focus);
 
-  background: var(--hmi-bg);
+  background: var(--pulse-color-surface);
+  border: 1px solid var(--pulse-color-border);
+  border-radius: var(--pulse-radius-lg);
   color: var(--hmi-text);
   min-height: 100%;
-  padding: var(--pulse-space-4);
+  padding: var(--pulse-space-5);
   display: flex;
   flex-direction: column;
   gap: var(--pulse-space-5);
@@ -39,8 +38,8 @@
 /* ---------------- Buttons ---------------- */
 
 .hmi-screen button {
-  min-height: 56px;
-  min-width: 44px;
+  min-height: var(--pulse-touch-target-hmi);
+  min-width: var(--pulse-touch-target-min);
   padding: 0 var(--pulse-space-5);
   border-radius: var(--pulse-radius-md);
   font-size: 1.05rem;
@@ -50,23 +49,29 @@
   color: var(--hmi-text);
 }
 
-.hmi-primary-button {
-  background: var(--hmi-accent);
-  border-color: var(--hmi-accent);
-  color: #08111f;
+/* Scoped to .hmi-screen so they win over the base button rule above -
+   the primary and danger actions used to render as plain grey. */
+.hmi-screen .hmi-primary-button {
+  background: var(--pulse-color-primary);
+  border-color: var(--pulse-color-brand);
+  color: var(--pulse-color-primary-contrast);
 }
 
-.hmi-secondary-button {
+.hmi-screen .hmi-primary-button:hover:not(:disabled) {
+  background: var(--pulse-color-primary-hover);
+}
+
+.hmi-screen .hmi-secondary-button {
   background: var(--hmi-surface-raised);
 }
 
-.hmi-danger-button {
-  background: var(--hmi-danger);
-  border-color: var(--hmi-danger);
-  color: #1a0403;
+.hmi-screen .hmi-danger-button {
+  background: var(--pulse-fill-bad);
+  border-color: var(--pulse-color-danger);
+  color: #fff;
 }
 
-.hmi-ghost-button {
+.hmi-screen .hmi-ghost-button {
   background: transparent;
 }
 
@@ -119,8 +124,8 @@
 }
 
 .hmi-line-card {
-  background: var(--hmi-surface);
-  border: 1px solid var(--hmi-border);
+  background: var(--pulse-color-surface-2);
+  border: 1px solid var(--pulse-color-border);
   border-radius: var(--pulse-radius-lg);
   padding: var(--pulse-space-5);
   display: flex;
@@ -159,7 +164,7 @@
   padding: 0 var(--pulse-space-3);
   border-radius: var(--pulse-radius-sm);
   border: 1px solid var(--hmi-border);
-  background: var(--hmi-surface);
+  background: var(--pulse-color-input-bg);
   color: var(--hmi-text);
   font-weight: 400;
   font-size: 1rem;
@@ -215,6 +220,15 @@
   font-weight: 600;
 }
 
+.hmi-timer-notice {
+  color: var(--hmi-warning);
+  font-weight: 600;
+  border: 2px solid var(--hmi-warning);
+  border-radius: var(--pulse-radius-md);
+  background: var(--pulse-tint-warn);
+  padding: 0.6rem 0.9rem;
+}
+
 /* ---------------- Review / summary lists ---------------- */
 
 .hmi-review-list {
@@ -228,7 +242,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border-bottom: 1px solid var(--hmi-border);
+  border-bottom: 1px solid var(--pulse-color-border);
   padding-bottom: var(--pulse-space-2);
 }
 
@@ -245,46 +259,43 @@
 
 /* ---------------- Status pill ---------------- */
 
+/* The dashboard's badges: solid status fills, white text (>= 5.6:1). */
 .hmi-status-pill {
   display: inline-flex;
   align-items: center;
   padding: var(--pulse-space-1) var(--pulse-space-3);
-  border-radius: 999px;
+  border-radius: var(--pulse-radius-pill);
   font-weight: 700;
   font-size: var(--pulse-font-size-sm);
   width: fit-content;
+  color: #fff;
 }
 
 .hmi-status-pill--green {
-  background: rgba(51, 193, 122, 0.18);
-  color: var(--hmi-success);
+  background: var(--pulse-fill-good);
 }
 
 .hmi-status-pill--amber {
-  background: rgba(240, 173, 61, 0.18);
-  color: var(--hmi-warning);
+  background: var(--pulse-fill-warn);
 }
 
 .hmi-status-pill--red {
-  background: rgba(240, 85, 79, 0.18);
-  color: var(--hmi-danger);
+  background: var(--pulse-fill-bad);
 }
 
 .hmi-status-pill--blue {
-  background: rgba(76, 141, 255, 0.18);
-  color: var(--hmi-accent);
+  background: var(--pulse-fill-info);
 }
 
 /* State not known yet - deliberately neutral, never reads as "fine". */
 .hmi-status-pill--grey {
-  background: rgba(148, 163, 184, 0.22);
-  color: #cbd5e1;
+  background: var(--pulse-fill-neutral);
 }
 
 .hmi-line-card__detail {
   margin: 0;
   font-size: var(--pulse-font-size-sm);
-  color: #cbd5e1;
+  color: var(--pulse-color-text-2);
 }
 
 /* ---------------- Progress bar ---------------- */
@@ -299,7 +310,8 @@
   flex: 1;
   height: 20px;
   background: var(--hmi-surface-raised);
-  border-radius: 999px;
+  border: 1px solid var(--pulse-color-border);
+  border-radius: var(--pulse-radius-pill);
   overflow: hidden;
 }
 
@@ -365,6 +377,34 @@
   gap: var(--pulse-space-3);
 }
 
+/* End Run choices: the title, with its explanation on its own line. */
+.hmi-button-grid button small {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.8em;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.hmi-end-run-next .hmi-button-grid button {
+  min-height: 96px;
+  font-size: 1.2rem;
+}
+
+/* Carried faults (handover) and the open-faults notice on a run. */
+.hmi-fault-list {
+  display: grid;
+  gap: var(--pulse-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hmi-compact-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
 .hmi-planned-downtime__elapsed {
   color: var(--hmi-text-muted);
   font-size: 1.2rem;
@@ -376,6 +416,7 @@
   .hmi-screen {
     padding: var(--pulse-space-3);
     font-size: 1rem;
+    border-radius: var(--pulse-radius-md);
   }
 
   .hmi-form-grid,
@@ -392,3 +433,7 @@
     grid-template-columns: repeat(5, 1fr);
   }
 }
+
+.hmi-fault-choices { border: 0; padding: 0; margin: 1rem 0; min-width: 0; }
+.hmi-fault-choices legend { font-weight: 700; margin-bottom: .6rem; }
+.hmi-fault-choices button[aria-pressed="true"] { outline: 3px solid #2563eb; outline-offset: 2px; }

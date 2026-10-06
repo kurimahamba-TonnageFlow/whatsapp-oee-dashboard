@@ -1,3 +1,5 @@
+import { beforeEach as resetEngineeringStorage } from 'vitest'
+resetEngineeringStorage(() => localStorage.clear())
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from './Workspace'
@@ -75,6 +77,17 @@ function repairUpdate(overrides: Partial<EngineeringFaultRepairUpdate> = {}): En
 // ==========================================================
 
 describe('Engineering fault loading', () => {
+  it('keeps a restored production fault available for engineering work', async () => {
+    vi.mocked(engineeringApi.getFaults).mockResolvedValue({ items: [fault({
+      production_status: 'Resolved', resolved_at: '2026-09-18T09:10:00+00:00', engineering_status: 'Ongoing', engineer: 'Alfie', accepted_at: '2026-09-18T09:05:00+00:00',
+    })], total: 1 })
+    renderWorkspace()
+    const card = await screen.findByRole('button', { name: 'BV1 - Film Jam, Rovema' })
+    expect(screen.getByText('Open: 1')).toBeInTheDocument()
+    fireEvent.click(card)
+    expect(screen.getByRole('button', { name: 'Hand Over Job' })).toBeInTheDocument()
+    expect(screen.getByText('Production restored', { selector: 'dt' })).toBeInTheDocument()
+  })
   it('shows a loading state before the first response arrives', () => {
     vi.mocked(engineeringApi.getFaults).mockReturnValue(new Promise(() => {}))
 
@@ -284,7 +297,7 @@ describe('Engineering fault actions', () => {
     fireEvent.click(screen.getByRole('button', { name: /accept job/i }))
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /accept job/i }))
 
-    await waitFor(() => expect(engineeringApi.acceptFault).toHaveBeenCalledWith('test-token', 1))
+    await waitFor(() => expect(engineeringApi.acceptFault).toHaveBeenCalledWith('test-token', 1, undefined, expect.any(String)))
     await waitFor(() => expect(engineeringApi.getFaults).toHaveBeenCalledTimes(2))
   })
 
@@ -337,7 +350,7 @@ describe('Engineering fault actions', () => {
       expect(engineeringApi.addRepairUpdate).toHaveBeenCalledWith(
         'test-token',
         1,
-        expect.objectContaining({ classification: 'Mechanical', finding: 'Sensor misaligned' }),
+        expect.objectContaining({ classification: 'Mechanical', finding: 'Sensor misaligned' }), undefined, expect.any(String),
       ),
     )
     await waitFor(() => expect(screen.getByText(/repair update saved/i)).toBeInTheDocument())
@@ -380,7 +393,7 @@ describe('Engineering fault actions', () => {
     fireEvent.change(within(updateSection).getByLabelText(/action taken/i), { target: { value: 'Realigned sensor' } })
     fireEvent.click(within(updateSection).getByRole('button', { name: /add repair update/i }))
 
-    await waitFor(() => expect(screen.getByText(/could not complete the request/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Save not confirmed/i)).toBeInTheDocument())
     expect((within(updateSection).getByLabelText(/finding/i) as HTMLTextAreaElement).value).toBe('Sensor misaligned')
   })
 
@@ -398,7 +411,7 @@ describe('Engineering fault actions', () => {
     fireEvent.click(within(closeSection).getByRole('radio', { name: 'No' }))
     fireEvent.click(within(closeSection).getByRole('button', { name: /close fault/i }))
 
-    expect(screen.getByText(/this will mark engineering status and production status as resolved/i)).toBeInTheDocument()
+    expect(screen.getByText(/this closes the Engineering job only/i)).toBeInTheDocument()
     expect(engineeringApi.closeFault).not.toHaveBeenCalled()
   })
 
@@ -578,7 +591,7 @@ describe('Engineering fault actions', () => {
 
     await closeTheFault()
 
-    expect(await screen.findByText(/could not complete the request/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Save not confirmed/i)).toBeInTheDocument()
     expect(screen.queryByText(/fault closed/i)).not.toBeInTheDocument()
 
     const section = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
@@ -882,7 +895,7 @@ describe('Engineering fault actions', () => {
     fireEvent.click(within(closeSection).getByRole('button', { name: /close fault/i }))
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /close fault/i }))
 
-    await waitFor(() => expect(screen.getByText(/could not complete the request/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Save not confirmed/i)).toBeInTheDocument())
 
     const section = screen.getByRole('heading', { name: 'Close Fault' }).closest('section') as HTMLElement
     expect(within(section).getByLabelText(/finding/i)).toHaveValue('Fixed')
@@ -1010,9 +1023,9 @@ describe('Hand Over Job', () => {
     expect(screen.queryByRole('button', { name: /^hand over job$/i })).not.toBeInTheDocument()
   })
 
-  it('hides the Hand Over Job controls when production_status is not Ongoing', async () => {
+  it('hides the Hand Over Job controls when both workflows are resolved', async () => {
     vi.mocked(engineeringApi.getFaults).mockResolvedValue({
-      items: [acceptedBy('Alfie', { production_status: 'Resolved', resolved_at: '2026-09-18T10:00:00+00:00' })],
+      items: [acceptedBy('Alfie', { production_status: 'Resolved', engineering_status: 'Resolved', resolved_at: '2026-09-18T10:00:00+00:00' })],
       total: 1,
     })
 
@@ -1149,7 +1162,7 @@ describe('Hand Over Job', () => {
       expect(engineeringApi.handOverFault).toHaveBeenCalledWith(
         'test-token',
         1,
-        { note: 'Escalating to shift lead.' },
+        { note: 'Escalating to shift lead.' }, undefined, expect.any(String),
       ),
     )
     await waitFor(() => expect(engineeringApi.getFaults).toHaveBeenCalledTimes(2))
@@ -1224,7 +1237,7 @@ describe('Hand Over Job', () => {
     fireEvent.click(within(handoverSection).getByRole('button', { name: /^hand over job$/i }))
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /^hand over job$/i }))
 
-    await waitFor(() => expect(screen.getByText(/could not complete the request/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Save not confirmed/i)).toBeInTheDocument())
   })
 
   it('prevents a duplicate handover request while one is already in flight', async () => {
@@ -1351,4 +1364,16 @@ describe('Repair-update history labelling', () => {
     // as a handover - the raw fixed action text is not user-facing copy.
     expect(screen.queryByText(/^action:/i)).not.toBeInTheDocument()
   })
+})
+
+
+it('shows technician details and explains separate production restart', async () => {
+  vi.mocked(engineeringApi.getFaults).mockResolvedValue({ items: [fault({
+    engineer: 'Alfie', engineering_status: 'Ongoing', report_note: 'Section: Pack folding. Guide catches the pack.',
+  })], total: 1 })
+  renderWorkspace()
+  fireEvent.click(await screen.findByRole('button', { name: 'BV1 - Film Jam, Rovema' }))
+  expect(screen.getByText('Section: Pack folding. Guide catches the pack.')).toBeInTheDocument()
+  expect(screen.getByText(/Closing completes the Engineering job/)).toBeInTheDocument()
+  expect(screen.queryByText(/Closing marks both/)).not.toBeInTheDocument()
 })

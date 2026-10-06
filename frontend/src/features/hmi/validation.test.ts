@@ -20,6 +20,18 @@ const VALID_FORM = {
 }
 
 describe('validateStartRunForm', () => {
+  it.each(['packsPerCase', 'casesPerPallet', 'palletsRemaining', 'previousRunCompleted'] as const)(
+    'rejects fractional %s before the API request', (field) => {
+      expect(validateStartRunForm({ ...VALID_FORM, [field]: '1.5' })[field]).toBe(
+        'Enter a whole number.',
+      )
+    },
+  )
+
+  it('allows decimal target speeds', () => {
+    expect(validateStartRunForm({ ...VALID_FORM, targetSpeedPpm: '120.5' })).toEqual({})
+  })
+
   it('accepts a fully valid form', () => {
     expect(hasStartRunFormErrors(validateStartRunForm(VALID_FORM))).toBe(false)
   })
@@ -51,19 +63,10 @@ describe('validateStartRunForm', () => {
     )
   })
 
-  it('rejects a non-positive target speed', () => {
-    expect(
-      validateStartRunForm({ ...VALID_FORM, targetSpeedPpm: '0' }).targetSpeedPpm,
-    ).toBeTruthy()
-    expect(
-      validateStartRunForm({ ...VALID_FORM, targetSpeedPpm: '-1' }).targetSpeedPpm,
-    ).toBeTruthy()
-  })
-
-  it('shows "Required." for a blank target speed, not the greater-than-0 message', () => {
-    expect(validateStartRunForm({ ...VALID_FORM, targetSpeedPpm: '' }).targetSpeedPpm).toBe(
-      'Required.',
-    )
+  it('does not ask technicians to supply the management standard', () => {
+    for (const targetSpeedPpm of ['', '0', '-1']) {
+      expect(validateStartRunForm({...VALID_FORM,targetSpeedPpm})).toEqual({})
+    }
   })
 
   it('rejects a non-positive cases per pallet', () => {

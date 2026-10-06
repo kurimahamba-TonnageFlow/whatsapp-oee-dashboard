@@ -39,8 +39,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 try:
-    from . import dashboard_reports, management_auth
+    from .api_logging import log_operation_failure
+    from . import dashboard_reports, hourly_reports, management_auth
     from .database import (
+        get_hourly_report_data,
         get_dashboard_downtime_events,
         get_dashboard_engineering_updates,
         get_dashboard_faults,
@@ -50,6 +52,7 @@ try:
         get_dashboard_run,
         get_dashboard_summary,
         get_dashboard_window_data,
+        get_line_stop_log,
         list_changeovers,
         list_dashboard_runs,
         list_weekly_targets,
@@ -59,13 +62,19 @@ try:
         factory_day_start,
         production_week_start_date,
         resolve_window,
+        shift_window_offset,
         week_window_starting,
     )
+    from .catalogue import canonical
+    from .domain_constants import PRODUCTS, CUSTOMERS, ENGINEERS
     from .main import line_technicians_by_line
 except ImportError:
+    from api_logging import log_operation_failure
     import dashboard_reports
+    import hourly_reports
     import management_auth
     from database import (
+        get_hourly_report_data,
         get_dashboard_downtime_events,
         get_dashboard_engineering_updates,
         get_dashboard_faults,
@@ -75,6 +84,7 @@ except ImportError:
         get_dashboard_run,
         get_dashboard_summary,
         get_dashboard_window_data,
+        get_line_stop_log,
         list_changeovers,
         list_dashboard_runs,
         list_weekly_targets,
@@ -84,8 +94,11 @@ except ImportError:
         factory_day_start,
         production_week_start_date,
         resolve_window,
+        shift_window_offset,
         week_window_starting,
     )
+    from catalogue import canonical
+    from domain_constants import PRODUCTS, CUSTOMERS, ENGINEERS
     from main import line_technicians_by_line
 
 
@@ -145,9 +158,8 @@ def dashboard_filters(
 def _call_db(operation_name, func, *args, **kwargs):
     try:
         return func(*args, **kwargs)
-    except Exception:
-        print("DATABASE ERROR")
-        print(f"Dashboard query failed: {operation_name}")
+    except Exception as error:
+        log_operation_failure("dashboard", operation_name, error)
 
         raise HTTPException(
             status_code=503,
@@ -191,6 +203,16 @@ class DashboardRunSummary(BaseModel):
     pallets_remaining: float
     total_pallets_completed: float
     changeover_type: str | None
+    # Additive (Stage 6C3): the run's output from its hourly updates, so
+    # the dashboard never recalculates it. null (never 0) when the run
+    # has no hourly updates yet.
+    hourly_update_count: int = 0
+    expected_pallets: float | None = None
+    actual_pallets: float | None = None
+    expected_tonnes: float | None = None
+    actual_tonnes: float | None = None
+    output_gap_pallets: float | None = None
+    output_gap_tonnes: float | None = None
 
 
 class DashboardRunsResponse(BaseModel):
@@ -337,6 +359,14 @@ def dashboard_filter_options():
     data = _call_db(
         "get_dashboard_filter_options", get_dashboard_filter_options
     )
+    # Include configured technicians before their first run, while retaining
+    # historical names so their older production runs remain searchable.
+    roster = {name for names in line_technicians_by_line.values() for name in names}
+    data = {**data, "technicians": sorted(roster | set(data["technicians"]), key=str.casefold)}
+    for field, configured in (("products", PRODUCTS), ("customers", CUSTOMERS), ("engineers", ENGINEERS),
+                              ("shifts", ("Days", "Afternoons", "Nights"))):
+        values = {canonical(field[:-1], value) if field != "engineers" else value for value in data[field]}
+        data[field] = list(configured) + sorted(values - set(configured), key=str.casefold)
     return DashboardFilterOptions(**data)
 
 
@@ -559,7 +589,9 @@ def dashboard_export(filters: dict = Depends(dashboard_filters)):
     ]
 
     buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    # extrasaction="ignore": list_dashboard_runs also returns per-run
+    # output columns for /runs; the export's columns stay exactly as listed.
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
 
     for row in rows:
@@ -635,6 +667,23 @@ def dashboard_overview(
     return _window_report(dashboard_reports.build_overview, window, production_line)
 
 
+@router.get("/hourly")
+def dashboard_hourly(
+    shift_offset: int = Query(default=0, ge=0, le=21, description="0 = current shift, 1 = previous, ..."),
+    production_line: str | None = None,
+):
+    """Each line's clock hours for one shift: the latest completed hour
+    and the earlier hours, line and product-run results, Output vs
+    target (all stops), stopped minutes and reasons."""
+    _require_known_line(production_line)
+    now = _utc_now()
+    window = shift_window_offset(now, shift_offset)
+    data = _call_db(
+        "get_hourly_report_data", get_hourly_report_data, window.start, window.end, production_line
+    )
+    return hourly_reports.build_hourly_report(data, window, now, production_line)
+
+
 @router.get("/lines")
 def dashboard_lines(window: WindowKind = "current_shift"):
     overview = _window_report(dashboard_reports.build_overview, window, None)
@@ -699,6 +748,21 @@ def dashboard_weekly_targets(week_start: date | None = None):
     )
 
     return dashboard_reports.build_weekly_targets(targets, data, week, now)
+
+
+@router.get("/line-stops")
+def dashboard_line_stops(
+    days: int = Query(default=7, ge=1, le=31, description="Stops that started in the last N days, or are open"),
+    production_line: str | None = None,
+):
+    """Between-run line stops with their reclassification history and the
+    corrections a manager may make."""
+    _require_known_line(production_line)
+    now = _utc_now()
+    data = _call_db(
+        "get_line_stop_log", get_line_stop_log, now - timedelta(days=days), production_line
+    )
+    return dashboard_reports.build_line_stop_log(data, now)
 
 
 @router.get("/changeovers")

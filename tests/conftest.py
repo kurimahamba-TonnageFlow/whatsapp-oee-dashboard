@@ -51,3 +51,17 @@ def pytest_collection(session):
         return (yield)
     finally:
         database.get_database_connection = real_connection
+
+
+@pytest.fixture(autouse=True)
+def authenticated_tablet_for_existing_workflow_tests():
+    """Workflow tests exercise an authenticated tablet; security tests remove this override."""
+    from src.api import app
+    from src.hmi_auth import require_hmi_access
+    previous = app.dependency_overrides.get(require_hmi_access)
+    app.dependency_overrides[require_hmi_access] = lambda: {"device_name": "Test tablet"}
+    yield
+    if previous is None:
+        app.dependency_overrides.pop(require_hmi_access, None)
+    else:
+        app.dependency_overrides[require_hmi_access] = previous

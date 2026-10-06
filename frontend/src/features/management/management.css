@@ -1,0 +1,359 @@
+/* Management area - built only from the shared design tokens
+   (src/styles/tokens.css, the management dashboard's palette): the same
+   panels, badges, notices and buttons as the dashboards, laid out for
+   reading settings, decisions and history. */
+
+.management-panel {
+  background: var(--pulse-color-surface);
+  border: 1px solid var(--pulse-color-border);
+  border-radius: var(--pulse-radius-lg);
+  padding: var(--pulse-space-6);
+}
+
+.management-eyebrow {
+  margin: 0 0 var(--pulse-space-1);
+  font-size: var(--pulse-font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pulse-color-brand);
+}
+
+.management-muted {
+  color: var(--pulse-color-text-muted);
+}
+
+.management-login {
+  display: flex;
+  justify-content: center;
+}
+
+.management-login__panel {
+  width: 100%;
+  max-width: 440px;
+}
+
+.management-login__panel h1 {
+  margin: 0 0 var(--pulse-space-3);
+  font-size: var(--pulse-font-size-xl);
+}
+
+.management-login form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-4);
+  margin-top: var(--pulse-space-5);
+}
+
+.management-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-2);
+  font-weight: 600;
+}
+
+.management-field input {
+  min-height: var(--pulse-touch-target-min);
+  padding: 0 var(--pulse-space-3);
+  border: 1px solid var(--pulse-color-border-strong);
+  border-radius: var(--pulse-radius-sm);
+  background: var(--pulse-color-input-bg);
+  font-weight: 400;
+}
+
+.management-primary-button {
+  background: var(--pulse-color-primary);
+  border-color: var(--pulse-color-brand);
+  color: var(--pulse-color-primary-contrast);
+  font-weight: 700;
+}
+
+.management-primary-button:hover:not(:disabled) {
+  background: var(--pulse-color-primary-hover);
+}
+
+.management-primary-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.management-secondary-button {
+  font-weight: 600;
+}
+
+.management-alert,
+.management-notice {
+  margin: 0;
+  padding: var(--pulse-space-3) var(--pulse-space-4);
+  border-radius: var(--pulse-radius-sm);
+  border-left: 4px solid;
+}
+
+.management-alert {
+  border-color: var(--pulse-color-danger);
+  background: var(--pulse-tint-bad);
+  color: var(--pulse-color-danger);
+  font-weight: 600;
+}
+
+.management-notice {
+  margin-top: var(--pulse-space-3);
+  border-color: var(--pulse-color-info);
+  background: var(--pulse-tint-info);
+}
+
+.management-session-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pulse-space-3);
+  margin-bottom: var(--pulse-space-5);
+  padding: var(--pulse-space-3) var(--pulse-space-4);
+  background: var(--pulse-color-surface);
+  border: 1px solid var(--pulse-color-border);
+  border-radius: var(--pulse-radius-md);
+}
+
+.management-session-bar__text {
+  margin: 0;
+}
+
+.management-home h1 {
+  margin: 0 0 var(--pulse-space-2);
+  font-size: var(--pulse-font-size-xl);
+}
+
+.management-cards {
+  list-style: none;
+  margin: var(--pulse-space-5) 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--pulse-space-4);
+}
+
+.management-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-2);
+  height: 100%;
+  min-height: var(--pulse-touch-target-min);
+  padding: var(--pulse-space-5);
+  background: var(--pulse-color-surface);
+  border: 1px solid var(--pulse-color-border);
+  border-radius: var(--pulse-radius-lg);
+  color: var(--pulse-color-text);
+  text-decoration: none;
+}
+
+.management-card--link {
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.management-card--link:hover,
+.management-card--link:focus-visible {
+  border-color: var(--pulse-color-brand);
+  background: var(--pulse-color-surface-2);
+}
+
+.management-card--phase2 {
+  background: var(--pulse-color-bg);
+  border-style: dashed;
+  color: var(--pulse-color-text-muted);
+  cursor: default;
+}
+
+.management-card--phase2 .management-card__title {
+  color: var(--pulse-color-text-muted);
+}
+
+/* The dashboard's badges: solid fills, white text. */
+.management-card__badge {
+  align-self: flex-start;
+  padding: 2px var(--pulse-space-3);
+  border-radius: var(--pulse-radius-pill);
+  font-size: var(--pulse-font-size-xs);
+  font-weight: 700;
+  color: #fff;
+}
+
+.management-card__badge--open {
+  background: var(--pulse-fill-good);
+}
+
+.management-card__badge--phase2 {
+  background: var(--pulse-fill-neutral);
+}
+
+.management-card__action {
+  margin-top: auto;
+  padding-top: var(--pulse-space-2);
+  color: var(--pulse-color-brand);
+  font-weight: 700;
+}
+
+.management-card__title {
+  margin: 0;
+  font-size: var(--pulse-font-size-lg);
+}
+
+.management-card__description {
+  margin: 0;
+  color: var(--pulse-color-text-muted);
+}
+
+@media (min-width: 768px) {
+  .management-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1180px) {
+  .management-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .management-panel {
+    padding: var(--pulse-space-5);
+  }
+}
+
+/* ---------------- Active runs ---------------- */
+
+.management-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.management-active-runs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-4);
+}
+
+.management-active-runs h1 {
+  margin: 0;
+  font-size: var(--pulse-font-size-xl);
+}
+
+.management-active-runs .management-notice p {
+  margin: 0 0 var(--pulse-space-2);
+}
+
+.management-active-runs .management-notice p:last-child {
+  margin-bottom: 0;
+}
+
+.management-table-wrap {
+  overflow-x: auto;
+  background: var(--pulse-color-surface);
+  border: 1px solid var(--pulse-color-border);
+  border-radius: var(--pulse-radius-lg);
+}
+
+.management-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.management-table th,
+.management-table td {
+  padding: var(--pulse-space-3) var(--pulse-space-4);
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--pulse-color-border);
+}
+
+.management-table thead th {
+  font-size: var(--pulse-font-size-sm);
+  color: var(--pulse-color-text-muted);
+  white-space: nowrap;
+}
+
+.management-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.management-force-close h2 {
+  margin: 0 0 var(--pulse-space-4);
+  font-size: var(--pulse-font-size-lg);
+}
+
+.management-force-close form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-4);
+}
+
+.management-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--pulse-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.management-choices legend {
+  margin-bottom: var(--pulse-space-2);
+  font-weight: 600;
+}
+
+.management-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--pulse-space-2);
+  min-height: var(--pulse-touch-target-min);
+  padding: 0 var(--pulse-space-3);
+  border: 1px solid var(--pulse-color-border);
+  border-radius: var(--pulse-radius-sm);
+  cursor: pointer;
+}
+
+.management-field textarea {
+  padding: var(--pulse-space-2) var(--pulse-space-3);
+  border: 1px solid var(--pulse-color-border-strong);
+  border-radius: var(--pulse-radius-sm);
+  background: var(--pulse-color-input-bg);
+  font: inherit;
+  font-weight: 400;
+}
+
+.management-consequences {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pulse-space-2);
+  margin: 0 0 var(--pulse-space-4);
+  padding-left: var(--pulse-space-5);
+}
+
+.management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pulse-space-3);
+}
+
+.management-danger-button {
+  background: var(--pulse-fill-bad);
+  border-color: var(--pulse-color-danger);
+  color: #fff;
+  font-weight: 700;
+}
+
+.management-danger-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

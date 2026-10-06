@@ -110,7 +110,7 @@ export function FaultDetailPanel({
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [isConfirming, onClose])
 
-  const isOpen = fault.production_status === 'Ongoing'
+  const isOpen = fault.engineering_status !== 'Resolved'
   const isMine = fault.engineer === currentEngineer
   const isUnassigned = fault.engineer === null
   const canHandOver = canHandOverFault(fault, currentEngineer)
@@ -151,7 +151,7 @@ export function FaultDetailPanel({
             <dd>{formatTimestamp(fault.opened_at)}</dd>
           </div>
           <div>
-            <dt>Elapsed</dt>
+            <dt>Production downtime</dt>
             <dd>{formatDuration(fault.duration_minutes)}</dd>
           </div>
           <div>
@@ -174,11 +174,16 @@ export function FaultDetailPanel({
           )}
           {fault.resolved_at && (
             <div>
-              <dt>Resolved</dt>
+              <dt>Production restored</dt>
               <dd>{formatTimestamp(fault.resolved_at)}</dd>
             </div>
           )}
         </dl>
+
+        {fault.report_note && <section aria-label="Technician report">
+          <h3>Technician report</h3>
+          <p style={{ whiteSpace: 'pre-wrap' }}>{fault.report_note}</p>
+        </section>}
 
         {isOpen && isUnassigned && (
           <button type="button" className="engineering-primary-button" onClick={onRequestAccept} disabled={isAccepting}>
@@ -204,6 +209,7 @@ export function FaultDetailPanel({
             {isHandoverFormOpen ? (
               <>
                 <HandoverForm
+                  draftKey={`fault:${currentEngineer}:${fault.downtime_event_id}:handover`}
                   isSubmitting={isSubmittingHandover}
                   onSubmit={(note) => setPendingAction({ type: 'handover', note })}
                 />
@@ -291,6 +297,7 @@ export function FaultDetailPanel({
                 </p>
               )}
               <RepairUpdateForm
+                draftKey={`fault:${currentEngineer}:${fault.downtime_event_id}:update`}
                 mode="update"
                 isSubmitting={isSubmittingUpdate}
                 onSubmit={onSubmitUpdate}
@@ -301,8 +308,8 @@ export function FaultDetailPanel({
             <section className="engineering-close-fault">
               <h3>Close Fault</h3>
               <p className="engineering-inline-note">
-                Closing marks both Engineering status and Production status as Resolved. This cannot be
-                undone from this screen.
+                Closing completes the Engineering job. The line technician records production restart
+                separately. This cannot be undone from this screen.
               </p>
               {closeError && (
                 <p className="engineering-inline-error" role="alert">
@@ -310,6 +317,7 @@ export function FaultDetailPanel({
                 </p>
               )}
               <RepairUpdateForm
+                draftKey={`fault:${currentEngineer}:${fault.downtime_event_id}:close`}
                 mode="close"
                 isSubmitting={isSubmittingClose}
                 onSubmit={(payload) =>
@@ -325,7 +333,7 @@ export function FaultDetailPanel({
       {pendingAction?.type === 'close' && (
         <ConfirmDialog
           title="Close this fault?"
-          message="This will mark Engineering status and Production status as Resolved for this fault. This cannot be undone from this screen."
+          message="This closes the Engineering job only. The line technician confirms production restart separately. Closing this job does not stop production downtime or change a recorded restart time."
           confirmLabel="Close Fault"
           variant="danger"
           isBusy={isSubmittingClose}

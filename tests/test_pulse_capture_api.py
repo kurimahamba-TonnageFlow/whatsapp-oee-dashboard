@@ -65,7 +65,7 @@ def raising(error):
 
 
 WRITE_ROUTES = [
-    ("/api/v1/runs/5/hourly-updates", {"line_technician": "Liam", "pallets_produced": "2"}),
+    ("/api/v1/runs/5/hourly-updates", {"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "2"}),
     ("/api/v1/runs/5/planned-downtime", {"reason": "Film Change", "started_by": "Liam"}),
     ("/api/v1/planned-downtime/3/end", {"ended_by": "Liam"}),
     ("/api/v1/runs/5/faults", {"reported_by": "Liam", "machine": "BV1", "reason": "Jam", "note": "Stuck"}),
@@ -92,7 +92,7 @@ def test_every_capture_write_requires_an_idempotency_key(path, body, monkeypatch
 # ==========================================================
 
 
-def saved_hourly(run_id, pallets, *_rest):
+def saved_hourly(run_id, hour_start, pallets, *_rest):
     values = calc.hourly_update_values(
         CONFIG, pallets, Decimal(60), Decimal(10),
         {"pallets_remaining": 25, "total_pallets_completed": 0, "potential_overrun_pallets": 0},
@@ -102,6 +102,8 @@ def saved_hourly(run_id, pallets, *_rest):
         "hourly_update_id": 77,
         "production_run_id": run_id,
         "production_line": "Rovema",
+        "hour_start": hour_start,
+        "hour_label": "07:00–08:00",
         "period_started_at": NOW - timedelta(hours=1),
         "period_ended_at": NOW,
         "shift": "Day",
@@ -116,18 +118,20 @@ def test_hourly_update_accepts_decimal_string_and_returns_backend_figures(monkey
     monkeypatch.setattr(capture, "record_hourly_update", fake)
 
     response = client.post(
-        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "pallets_produced": "3.75"}
+        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "3.75"}
     )
 
     assert response.status_code == 201
     args = fake.calls[0]["args"]
-    assert args[1] == Decimal("3.75")
-    assert args[4] == NOW
+    assert args[1] == datetime(2026, 1, 12, 7, tzinfo=timezone.utc)
+    assert args[2] == Decimal("3.75")
+    assert args[5] == NOW
     assert fake.calls[0]["idempotency"].key == KEY
     assert fake.calls[0]["idempotency"].action == "hourly_update:5"
 
     body = response.json()
     assert body["pallets_produced"] == 3.75
+    assert body["hour_label"] == "07:00–08:00"
     assert body["expected_packs"] == 504.0
     assert body["actual_packs"] == 375.0
     assert body["production_achievement_percent"] == 74.4
@@ -142,11 +146,11 @@ def test_zero_pallets_is_a_valid_hourly_update(monkeypatch):
     monkeypatch.setattr(capture, "record_hourly_update", fake)
 
     response = client.post(
-        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "pallets_produced": "0"}
+        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "0"}
     )
 
     assert response.status_code == 201
-    assert fake.calls[0]["args"][1] == Decimal(0)
+    assert fake.calls[0]["args"][2] == Decimal(0)
     assert response.json()["pallets_produced"] == 0.0
 
 
@@ -162,7 +166,7 @@ def test_stored_response_is_what_the_client_receives(monkeypatch):
     monkeypatch.setattr(capture, "record_hourly_update", fake)
 
     response = client.post(
-        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "pallets_produced": "2"}
+        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "2"}
     )
 
     assert stored["pair"] == (201, response.json())
@@ -174,7 +178,7 @@ def test_retry_with_the_same_key_replays_the_original_update(monkeypatch):
     monkeypatch.setattr(capture, "record_hourly_update", raising(IdempotentReplay(201, original)))
 
     response = client.post(
-        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "pallets_produced": "3.75"}
+        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "3.75"}
     )
 
     assert response.status_code == 201
@@ -187,9 +191,9 @@ def test_two_different_hourly_updates_are_both_accepted(monkeypatch):
     monkeypatch.setattr(capture, "get_production_run_by_id", run_row())
     monkeypatch.setattr(capture, "record_hourly_update", fake)
 
-    first = client.post("/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "pallets_produced": "2"},
+    first = client.post("/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "2"},
                         headers={"Idempotency-Key": "hourly-key-aaaaaaaaaaaa01"})
-    second = client.post("/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "pallets_produced": "2"},
+    second = client.post("/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "2"},
                          headers={"Idempotency-Key": "hourly-key-aaaaaaaaaaaa02"})
 
     assert first.status_code == second.status_code == 201
@@ -200,14 +204,17 @@ def test_two_different_hourly_updates_are_both_accepted(monkeypatch):
 @pytest.mark.parametrize(
     "payload",
     [
-        {"line_technician": "Liam", "pallets_produced": "-1"},
-        {"line_technician": "Liam", "pallets_produced": "1.23456"},
-        {"line_technician": "Liam", "pallets_produced": "1001"},
-        {"line_technician": "Liam", "pallets_produced": "NaN"},
-        {"line_technician": "Liam", "pallets_produced": "abc"},
-        {"line_technician": "   ", "pallets_produced": "2"},
+        {"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "-1"},
+        {"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "1.23456"},
+        {"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "1001"},
+        {"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "NaN"},
+        {"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "abc"},
+        {"line_technician": "   ", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "2"},
         {"pallets_produced": "2"},
         {"line_technician": "Liam"},
+        {"line_technician": "Liam", "pallets_produced": "2"},                     # no hour
+        {"line_technician": "Liam", "hour_start": "2026-01-12T07:30:00Z", "pallets_produced": "2"},  # part hour
+        {"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00", "pallets_produced": "2"},   # no zone
     ],
 )
 def test_hourly_update_rejects_invalid_input_before_touching_the_database(payload, monkeypatch):
@@ -227,7 +234,7 @@ def test_hourly_update_rejects_unknown_technician(monkeypatch):
     monkeypatch.setattr(capture, "record_hourly_update", fake)
 
     response = client.post(
-        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Nobody", "pallets_produced": "2"}
+        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Nobody", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "2"}
     )
 
     assert response.status_code == 422
@@ -238,7 +245,7 @@ def test_hourly_update_unknown_run_is_404(monkeypatch):
     monkeypatch.setattr(capture, "get_production_run_by_id", lambda run_id: None)
 
     response = client.post(
-        "/api/v1/runs/404/hourly-updates", json={"line_technician": "Liam", "pallets_produced": "2"}
+        "/api/v1/runs/404/hourly-updates", json={"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "2"}
     )
 
     assert response.status_code == 404
@@ -257,7 +264,7 @@ def test_hourly_update_conflicts_are_safe_409s(error, monkeypatch):
     monkeypatch.setattr(capture, "record_hourly_update", raising(error))
 
     response = client.post(
-        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "pallets_produced": "2"}
+        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "2"}
     )
 
     assert response.status_code == 409
@@ -269,7 +276,7 @@ def test_hourly_update_database_failure_is_safe_503(monkeypatch, capsys):
     monkeypatch.setattr(capture, "record_hourly_update", raising(RuntimeError(SECRET)))
 
     response = client.post(
-        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "pallets_produced": "2"}
+        "/api/v1/runs/5/hourly-updates", json={"line_technician": "Liam", "hour_start": "2026-01-12T07:00:00Z", "pallets_produced": "2"}
     )
 
     assert response.status_code == 503
@@ -567,6 +574,7 @@ def test_xray_count_below_palletised_output_returns_a_data_quality_warning(monke
 
 @pytest.fixture
 def completion_basis(monkeypatch):
+    monkeypatch.setattr(capture, "review_hourly_loss", lambda *a, **k: {"prompt_required": False})
     run = {
         "id": 5, "production_line": "Rovema", "status": "Active", "target_speed_ppm": Decimal("8.4"),
         "packs_per_case": 10, "cases_per_pallet": 10, "pack_weight_kg": Decimal("1"),
@@ -1097,3 +1105,354 @@ def test_all_capture_routes_are_registered():
     ]:
         assert method in paths[path], f"missing {method.upper()} {path}"
     assert "/api/v1/changeovers" not in paths
+
+
+# ==========================================================
+# FIXED CLOCK HOURS, TARGET SPEED, LINE STOPS, CARRIED FAULTS
+# ==========================================================
+
+UTC = timezone.utc
+
+
+def run_with_hours(started_at, finished_at=None):
+    return {
+        "run": {"id": 5, "started_at": started_at, "finished_at": finished_at},
+        "readings": [],
+    }
+
+
+def test_hours_list_asks_for_each_missed_hour_separately(monkeypatch):
+    # NOW is 08:00; run started 05:25 -> 05:00 (partial), 06:00 and 07:00 finished; 06:00 reported.
+    data = run_with_hours(datetime(2026, 1, 12, 5, 25, tzinfo=UTC))
+    data["readings"] = [{"hour_start": datetime(2026, 1, 12, 6, tzinfo=UTC), "pallets_completed": Decimal(4)}]
+    monkeypatch.setattr(capture, "get_run_hour_readings", lambda run_id: data)
+
+    body = client.get("/api/v1/runs/5/hours").json()
+
+    assert [h["hour_label"] for h in body["hours"]] == ["05:00–06:00", "06:00–07:00", "07:00–08:00"]
+    assert [h["status"] for h in body["hours"]] == ["due", "reported", "due"]
+    assert body["due_count"] == 2
+    assert body["next_due_hour"]["hour_label"] == "05:00–06:00"
+    assert body["hours"][0]["is_partial_hour"] is True
+    assert body["hours"][0]["applicable_minutes"] == 35.0
+    assert body["hours"][1]["pallets_produced"] == 4.0
+
+
+def test_the_current_hour_is_in_progress_not_due(monkeypatch):
+    monkeypatch.setattr(capture, "_now", lambda: datetime(2026, 1, 12, 8, 25, tzinfo=UTC))
+    monkeypatch.setattr(capture, "get_run_hour_readings",
+                        lambda run_id: run_with_hours(datetime(2026, 1, 12, 7, tzinfo=UTC)))
+
+    body = client.get("/api/v1/runs/5/hours").json()
+
+    assert [h["status"] for h in body["hours"]] == ["due", "in_progress"]
+    assert body["current_hour"]["applicable_minutes"] == 25.0
+
+
+def test_hours_list_unknown_run_is_404(monkeypatch):
+    monkeypatch.setattr(capture, "get_run_hour_readings", lambda run_id: None)
+    assert client.get("/api/v1/runs/9/hours").status_code == 404
+
+
+def test_target_speed_change_needs_a_reason(monkeypatch):
+    fake = recorder(lambda *args: None)
+    monkeypatch.setattr(capture, "get_production_run_by_id", run_row())
+    monkeypatch.setattr(capture, "record_target_speed_change", fake)
+
+    for body in (
+        {"line_technician": "Liam", "new_target_speed_ppm": "10"},
+        {"line_technician": "Liam", "new_target_speed_ppm": "10", "reason": "  "},
+        {"line_technician": "Liam", "new_target_speed_ppm": "0", "reason": "x"},
+    ):
+        assert client.post("/api/v1/runs/5/target-speed", json=body).status_code == 422
+    assert fake.calls == []
+
+
+def test_operating_speed_records_effective_and_submission_separately(monkeypatch):
+    fake = recorder(lambda run_id, new, reason, who, effective, submitted, supersedes: {
+        "id": 1, "previous_speed_ppm": None, "new_speed_ppm": new, "reason": reason,
+        "changed_by": who, "effective_at": effective or submitted, "submitted_at": submitted,
+        "supersedes_id": supersedes,
+    })
+    monkeypatch.setattr(capture, "get_production_run_by_id", run_row())
+    monkeypatch.setattr(capture, "record_operating_speed_change", fake)
+    response = client.post("/api/v1/runs/5/operating-speed",
+        json={"line_technician":"Liam","new_operating_speed_ppm":"90","reason":"Film trial",
+              "effective_at":"2026-01-12T06:30:00Z"})
+    assert response.status_code == 201
+    body=response.json()
+    assert body["new_speed_ppm"]==90 and body["previous_speed_ppm"] is None
+    assert body["effective_at"] != body["submitted_at"]
+    assert fake.calls[0]["args"][5] == NOW
+
+
+def test_legacy_target_endpoint_rejected_without_changing_evidence(monkeypatch):
+    monkeypatch.setattr(capture, "get_production_run_by_id", run_row())
+    response=client.post("/api/v1/runs/5/target-speed",
+        json={"line_technician":"Liam","new_target_speed_ppm":90,"reason":"Old client"})
+    assert response.status_code==409
+    assert "standard stays fixed" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("extra", [{"reason":" "},{"effective_at":"2026-01-12T06:30:00"}, {"new_operating_speed_ppm":-1}])
+def test_operating_speed_rejects_invalid_evidence(extra):
+    response=client.post("/api/v1/runs/5/operating-speed",
+        json={"line_technician":"Liam","new_operating_speed_ppm":90,"reason":"Film trial",**extra})
+    assert response.status_code==422
+
+
+def stoppage_result(kind="changeover", reason=None):
+    return {
+        "stoppage": {
+            "id": 11, "production_line": "Rovema", "kind": kind, "reason": reason,
+            "previous_production_run_id": 5, "next_production_run_id": None, "started_by": "Liam",
+            "started_at": NOW, "ended_by": None, "ended_at": None, "duration_minutes": None,
+        },
+        "changeover": None,
+    }
+
+
+def test_other_stop_requires_a_written_reason(monkeypatch):
+    fake = recorder(lambda *args: stoppage_result("other", "x"))
+    monkeypatch.setattr(capture, "start_line_stoppage", fake)
+
+    response = client.post("/api/v1/lines/Rovema/stoppages", json={"kind": "other", "started_by": "Liam"})
+
+    assert response.status_code == 422
+    assert fake.calls == []
+
+
+def test_other_stop_is_unplanned_and_changeover_is_planned(monkeypatch):
+    monkeypatch.setattr(capture, "start_line_stoppage", recorder(lambda *a: stoppage_result("other", "Power cut")))
+    other = client.post("/api/v1/lines/Rovema/stoppages",
+                        json={"kind": "other", "started_by": "Liam", "reason": "Power cut"})
+    assert other.status_code == 201
+    assert other.json()["downtime_type"] == "unplanned"
+
+    monkeypatch.setattr(capture, "start_line_stoppage", recorder(lambda *a: stoppage_result()))
+    changeover = client.post("/api/v1/lines/Rovema/stoppages", json={"kind": "changeover", "started_by": "Liam"},
+                             headers={"Idempotency-Key": "stoppage-key-00000000000002"})
+    assert changeover.json()["downtime_type"] == "planned"
+
+
+def test_line_stops_reject_unknown_lines_and_technicians(monkeypatch):
+    monkeypatch.setattr(capture, "start_line_stoppage", recorder(lambda *a: stoppage_result()))
+    assert client.post("/api/v1/lines/Nowhere/stoppages",
+                       json={"kind": "changeover", "started_by": "Liam"}).status_code == 422
+    assert client.post("/api/v1/lines/Rovema/stoppages",
+                       json={"kind": "changeover", "started_by": "Nobody"}).status_code == 422
+
+
+def test_end_line_stop_passes_the_server_time(monkeypatch):
+    result = stoppage_result()
+    result["stoppage"].update({"ended_at": NOW, "ended_by": "Liam", "duration_minutes": Decimal(30)})
+    fake = recorder(lambda *a: result)
+    monkeypatch.setattr(capture, "end_line_stoppage", fake)
+
+    response = client.post("/api/v1/line-stoppages/11/end", json={"ended_by": "Liam"})
+
+    assert response.status_code == 200
+    assert response.json()["duration_minutes"] == 30.0
+    assert fake.calls[0]["args"] == (11, "Liam", NOW)
+
+
+def line_fault(acknowledged):
+    return {
+        "downtime_event_id": 2, "production_run_id": 3, "fault_id": 1, "machine": "Casepacker",
+        "reason": "Open cases", "reported_by": "Liam", "engineer": "Aaron", "engineering_status": "Ongoing",
+        "opened_at": NOW - timedelta(days=3), "escalation_count": 0, "last_escalated_at": None,
+        "last_escalated_by": None, "acknowledged": acknowledged,
+    }
+
+
+def test_open_line_faults_lists_what_still_needs_acknowledging(monkeypatch):
+    monkeypatch.setattr(capture, "get_open_line_faults",
+                        lambda line: {"handover_at": NOW, "faults": [line_fault(False), line_fault(True)]})
+
+    body = client.get("/api/v1/lines/Rovema/open-faults").json()
+
+    assert body["unacknowledged_count"] == 1
+    assert body["faults"][0]["machine"] == "Casepacker"
+
+
+def test_acknowledge_escalates_the_existing_fault(monkeypatch):
+    fake = recorder(lambda *a: {"downtime_event_id": 2, "escalation_count": 1, "last_escalated_at": NOW,
+                                "last_escalated_by": "Liam", "acknowledgement_id": 8, "acknowledged_at": NOW})
+    monkeypatch.setattr(capture, "acknowledge_line_fault", fake)
+
+    response = client.post("/api/v1/faults/2/acknowledge",
+                           json={"production_line": "Rovema", "acknowledged_by": "Liam", "note": "Still open"})
+
+    assert response.status_code == 200
+    assert response.json()["escalated"] is True
+    assert response.json()["downtime_event_id"] == 2
+    assert fake.calls[0]["args"][:4] == (2, "Rovema", "Liam", "Still open")
+
+
+def test_new_writes_require_an_idempotency_key(monkeypatch):
+    anonymous = TestClient(app)
+    monkeypatch.setattr(capture, "get_production_run_by_id", run_row())
+    for path, body in (
+        ("/api/v1/runs/5/target-speed", {"line_technician": "Liam", "new_target_speed_ppm": "10", "reason": "x"}),
+        ("/api/v1/lines/Rovema/stoppages", {"kind": "changeover", "started_by": "Liam"}),
+        ("/api/v1/line-stoppages/11/end", {"ended_by": "Liam"}),
+        ("/api/v1/faults/2/acknowledge", {"production_line": "Rovema", "acknowledged_by": "Liam"}),
+    ):
+        assert anonymous.post(path, json=body).status_code == 422
+
+
+def test_restart_delay_is_unplanned_and_returned_with_the_resolved_other(monkeypatch):
+    result = stoppage_result("other", "Power cut")
+    result["stoppage"].update({"ended_at": NOW, "ended_by": "Liam", "duration_minutes": Decimal(20)})
+    result["restart_delay"] = {
+        **stoppage_result("restart_delay", "Power cut")["stoppage"], "id": 12, "started_at": NOW,
+    }
+    monkeypatch.setattr(capture, "end_line_stoppage", recorder(lambda *a: result))
+
+    body = client.post("/api/v1/line-stoppages/11/end", json={"ended_by": "Liam"}).json()
+
+    assert body["kind"] == "other" and body["downtime_type"] == "unplanned"
+    assert body["restart_delay"]["kind"] == "restart_delay"
+    assert body["restart_delay"]["downtime_type"] == "unplanned"
+    assert body["restart_delay"]["started_at"] == body["ended_at"]
+
+
+def test_a_restart_delay_cannot_be_started_by_hand(monkeypatch):
+    fake = recorder(lambda *a: stoppage_result())
+    monkeypatch.setattr(capture, "start_line_stoppage", fake)
+    response = client.post("/api/v1/lines/Rovema/stoppages", json={"kind": "restart_delay", "started_by": "Liam"})
+    assert response.status_code == 422 and fake.calls == []
+
+
+def test_a_manager_can_resolve_the_next_step_and_is_recorded_as_a_manager(monkeypatch):
+    from src import management_auth
+
+    monkeypatch.setattr(management_auth, "MANAGEMENT_PIN", "test-pin")
+    management_auth._sessions.clear()
+    token = management_auth.create_session("Priya")["token"]
+    fake = recorder(lambda *a: stoppage_result("other", "No orders"))
+    monkeypatch.setattr(capture, "start_line_stoppage", fake)
+
+    response = client.post(
+        "/api/v1/lines/Rovema/next-step/manager",
+        json={"kind": "other", "reason": "No orders"},
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "manager-next-step-000000001"},
+    )
+
+    assert response.status_code == 201
+    assert fake.calls[0]["args"] == ("Rovema", "other", "No orders", "Priya (manager)", NOW)
+    management_auth._sessions.clear()
+
+
+def test_the_manager_resolution_needs_a_management_session(monkeypatch):
+    fake = recorder(lambda *a: stoppage_result())
+    monkeypatch.setattr(capture, "start_line_stoppage", fake)
+    response = client.post("/api/v1/lines/Rovema/next-step/manager", json={"kind": "handover"})
+    assert response.status_code == 401 and fake.calls == []
+
+
+def test_not_scheduled_is_a_next_step_choice_that_is_neither_planned_nor_unplanned(monkeypatch):
+    fake = recorder(lambda *a: stoppage_result("not_scheduled"))
+    monkeypatch.setattr(capture, "start_line_stoppage", fake)
+
+    response = client.post("/api/v1/lines/Rovema/stoppages", json={"kind": "not_scheduled", "started_by": "Liam"})
+
+    assert response.status_code == 201
+    assert response.json()["downtime_type"] == "not_scheduled"
+    assert fake.calls[0]["args"][1] == "not_scheduled"
+
+
+def manager_token(monkeypatch, name="Priya"):
+    from src import management_auth
+
+    monkeypatch.setattr(management_auth, "MANAGEMENT_PIN", "test-pin")
+    management_auth._sessions.clear()
+    return management_auth.create_session(name)["token"]
+
+
+def test_a_manager_reclassifies_a_stop_and_the_audit_is_returned(monkeypatch):
+    token = manager_token(monkeypatch)
+    result = stoppage_result("not_scheduled")
+    result["reclassification"] = {
+        "id": 3, "line_stoppage_id": 11, "previous_kind": "other", "previous_reason": "No orders",
+        "new_kind": "not_scheduled", "new_reason": None, "changed_by": "Priya", "changed_at": NOW,
+        "note": "Not on the plan",
+    }
+    fake = recorder(lambda *a: result)
+    monkeypatch.setattr(capture, "reclassify_line_stoppage", fake)
+
+    response = client.post(
+        "/api/v1/line-stoppages/11/reclassify",
+        json={"new_kind": "not_scheduled", "note": "Not on the plan"},
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "reclassify-key-0000000001"},
+    )
+
+    assert response.status_code == 200
+    assert fake.calls[0]["args"] == (11, "not_scheduled", None, "Priya", "Not on the plan", NOW)
+    body = response.json()
+    assert body["kind"] == "not_scheduled" and body["downtime_type"] == "not_scheduled"
+    assert body["reclassification"]["previous_kind"] == "other"
+
+
+def test_reclassifying_needs_a_session_a_note_and_a_reason_for_other(monkeypatch):
+    fake = recorder(lambda *a: stoppage_result())
+    monkeypatch.setattr(capture, "reclassify_line_stoppage", fake)
+    assert client.post("/api/v1/line-stoppages/11/reclassify",
+                       json={"new_kind": "not_scheduled", "note": "x"}).status_code == 401
+
+    auth = {"Authorization": f"Bearer {manager_token(monkeypatch)}"}
+    assert client.post("/api/v1/line-stoppages/11/reclassify",
+                       json={"new_kind": "not_scheduled"}, headers=auth).status_code == 422
+    assert client.post("/api/v1/line-stoppages/11/reclassify",
+                       json={"new_kind": "other", "note": "x"}, headers=auth).status_code == 422
+    assert client.post("/api/v1/line-stoppages/11/reclassify",
+                       json={"new_kind": "changeover", "note": "x"}, headers=auth).status_code == 422
+    assert fake.calls == []
+
+
+RESTORE_BODY = {"production_line": "Rovema", "technician": "Liam", "note": "Cleared jam", "restored_at": "2026-01-12T06:10:00Z"}
+
+
+def test_production_restore_accepts_actual_time_and_preserves_engineering(monkeypatch):
+    calls = []
+    def restore(*args, **kwargs):
+        calls.append(args)
+        return {"downtime_event_id": 8, "production_status": "Resolved", "engineering_status": "Ongoing", "resolved_at": args[4]}
+    monkeypatch.setattr(capture, "restore_fault_production", restore)
+    response = client.post("/api/v1/faults/8/production-restored", json=RESTORE_BODY)
+    assert response.status_code == 200
+    assert response.json()["engineering_status"] == "Ongoing"
+    assert calls[0][4] == datetime(2026, 1, 12, 6, 10, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("change", [{"note": "  "}, {"technician": "Unknown"}, {"restored_at": "2026-01-12T06:10:00"}])
+def test_restore_rejects_invalid_input_without_a_write(monkeypatch, change):
+    def forbidden(*args, **kwargs): raise AssertionError("Invalid restoration must not write")
+    monkeypatch.setattr(capture, "restore_fault_production", forbidden)
+    assert client.post("/api/v1/faults/8/production-restored", json={**RESTORE_BODY, **change}).status_code == 422
+
+
+def test_restore_requires_idempotency_key():
+    response = TestClient(app).post("/api/v1/faults/8/production-restored", json=RESTORE_BODY)
+    assert response.status_code == 422
+
+
+def test_hourly_loss_review_is_read_only_and_uses_exact_pallet_input(monkeypatch):
+    monkeypatch.setattr(capture, 'get_production_run_by_id', run_row())
+    calls = []
+    def review(*args):
+        calls.append(args)
+        return {'target_packs':6000,'remaining_gap_packs':2800,'equivalent_minutes':28,'prompt_required':True}
+    monkeypatch.setattr(capture, 'review_hourly_loss', review)
+    response = TestClient(app).post('/api/v1/runs/5/hourly-loss-review', json={
+        'line_technician':'Liam','hour_start':'2026-01-12T06:00:00Z','pallets_produced':'3.75'})
+    assert response.status_code == 200
+    assert response.json()['prompt_required'] is True
+    assert calls[0][2] == Decimal('3.75')
+
+
+def test_hourly_loss_review_rejects_unknown_technician(monkeypatch):
+    monkeypatch.setattr(capture, 'get_production_run_by_id', run_row())
+    response = client.post('/api/v1/runs/5/hourly-loss-review', json={
+        'line_technician':'Unknown','hour_start':'2026-01-12T06:00:00Z','pallets_produced':'3'})
+    assert response.status_code == 422

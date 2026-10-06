@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useDraft } from './drafts'
+import { useEffect, useRef, useState } from 'react'
 import { FieldError } from './FieldError'
 import {
   MAINTENANCE_PREVENTABLE_OPTIONS,
@@ -21,6 +22,7 @@ interface RepairUpdateFormProps {
    * repair fields and their validation are identical either way;
    * closing additionally requires the maintenance-preventability
    * answer, which the backend stores on the fault. */
+  draftKey?: string
   mode: 'update' | 'close'
   isSubmitting: boolean
   onSubmit: (payload: RepairUpdatePayload | CloseFaultPayload) => void
@@ -31,17 +33,19 @@ interface RepairUpdateFormProps {
   resetSignal?: number
 }
 
-export function RepairUpdateForm({ mode, isSubmitting, onSubmit, resetSignal }: RepairUpdateFormProps) {
-  const [values, setValues] = useState<RepairUpdateFormValues>(EMPTY_REPAIR_UPDATE_FORM)
+export function RepairUpdateForm({ mode, isSubmitting, onSubmit, resetSignal, draftKey }: RepairUpdateFormProps) {
+  const [values, setValues] = useDraft<RepairUpdateFormValues>(draftKey, EMPTY_REPAIR_UPDATE_FORM)
   const [errors, setErrors] = useState(validateRepairUpdateForm(EMPTY_REPAIR_UPDATE_FORM, mode))
   const [touched, setTouched] = useState(false)
 
+  const previousReset = useRef(resetSignal)
   useEffect(() => {
-    if (resetSignal === undefined) return
+    if (resetSignal === undefined || previousReset.current === resetSignal) return
+    previousReset.current = resetSignal
     setValues(EMPTY_REPAIR_UPDATE_FORM)
     setErrors(validateRepairUpdateForm(EMPTY_REPAIR_UPDATE_FORM, mode))
     setTouched(false)
-  }, [resetSignal, mode])
+  }, [resetSignal, mode, setValues])
 
   function setField<K extends keyof RepairUpdateFormValues>(key: K, value: RepairUpdateFormValues[K]) {
     setValues((current) => ({ ...current, [key]: value }))

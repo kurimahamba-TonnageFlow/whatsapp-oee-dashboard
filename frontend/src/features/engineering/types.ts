@@ -47,6 +47,7 @@ export interface EngineeringFault {
   fault_id: number
   machine: string
   reason: string
+  report_note?: string | null
   reported_by: string
   engineer: string | null
   production_status: string

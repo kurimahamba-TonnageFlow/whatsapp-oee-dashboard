@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ProgressBar } from '../components/ProgressBar'
+import { ProductionRestoreForm } from '../components/ProductionRestoreForm'
 import { StatusPill } from '../components/StatusPill'
 import { formatDuration, statusToneForAchievement } from '../progress'
 import type { PendingAction } from '../idempotency'
@@ -10,12 +11,14 @@ interface ActiveRunScreenProps {
   isRefreshing: boolean
   refreshError: string | null
   pendingAction: PendingAction | null
+  isRetryingPending?: boolean
   onRefresh: () => void
   onResolvePending: () => void
   onDiscardPending: () => void
   onHourlyUpdate: () => void
   onPlannedDowntime: () => void
   onReportToEngineer: () => void
+  onChangeTargetSpeed?: () => void
   onCompleteRun: () => void
   onExitRestart: () => void
 }
@@ -44,12 +47,14 @@ export function ActiveRunScreen({
   isRefreshing,
   refreshError,
   pendingAction,
+  isRetryingPending = false,
   onRefresh,
   onResolvePending,
   onDiscardPending,
   onHourlyUpdate,
   onPlannedDowntime,
   onReportToEngineer,
+  onChangeTargetSpeed,
   onCompleteRun,
   onExitRestart,
 }: ActiveRunScreenProps) {
@@ -83,10 +88,16 @@ export function ActiveRunScreen({
   const plannedTotal = run.starting_pallets_remaining
   const percentComplete = plannedTotal > 0 ? (run.total_pallets_completed / plannedTotal) * 100 : 0
   const elapsedMinutes = Math.max((now.getTime() - new Date(run.started_at).getTime()) / 60000, 0)
-  const hourlyUpdateDue = now >= new Date(progress.next_hourly_update_due_at)
+  // Fixed clock hours: the server lists every finished hour still
+  // without a reading. Older payloads without `hours` fall back to the
+  // prompt time.
+  const dueHours = (state.hours?.hours ?? []).filter((hour) => hour.status === 'due')
+  const hourlyUpdateDue = state.hours ? dueHours.length > 0 : now >= new Date(progress.next_hourly_update_due_at)
+  const lineFaults = state.line_faults ?? []
 
   return (
     <div className="hmi-screen hmi-active-run">
+      {run.standard_speed_ppm === null && <p role="status">Legacy run: its agreed standard is unknown. Historical target figures below are retained evidence, not a verified fixed-standard comparison.</p>}
       <header className="hmi-active-run__header">
         <div>
           <h1>{run.production_line}</h1>
@@ -112,10 +123,10 @@ export function ActiveRunScreen({
             twice.
           </p>
           <div className="hmi-form-actions">
-            <button type="button" className="hmi-primary-button" onClick={onResolvePending}>
+            <button type="button" className="hmi-primary-button" onClick={onResolvePending} disabled={isRetryingPending}>
               Check and retry
             </button>
-            <button type="button" className="hmi-secondary-button" onClick={onDiscardPending}>
+            <button type="button" className="hmi-secondary-button" onClick={onDiscardPending} disabled={isRetryingPending}>
               Discard
             </button>
           </div>
@@ -140,8 +151,32 @@ export function ActiveRunScreen({
 
       {hourlyUpdateDue && !state.open_planned_downtime && (
         <p className="hmi-inline-warning" role="status">
-          Hourly update due
+          {dueHours.length > 1
+            ? `${dueHours.length} hours to report: ${dueHours.map((hour) => hour.hour_label).join(', ')}`
+            : dueHours.length === 1
+              ? `Hourly update due: ${dueHours[0].hour_label}`
+              : 'Hourly update due'}
         </p>
+      )}
+
+      {lineFaults.length > 0 && (
+        <div className="hmi-inline-error" role="status" aria-label="Open faults on this line">
+          <p>
+            <strong>
+              {lineFaults.length === 1 ? '1 fault open on this line' : `${lineFaults.length} faults open on this line`}
+            </strong>{' '}
+            (confirm the actual restart time when production is restored)
+          </p>
+          <ul className="hmi-compact-list">
+            {lineFaults.map((fault) => (
+              <li key={fault.downtime_event_id}>
+                {fault.machine} — {fault.reason} · since {clockTime(fault.opened_at)}
+                {fault.production_run_id !== run.run_id && ' · carried from an earlier run'}
+                <ProductionRestoreForm fault={fault} line={run.production_line} technician={run.line_technician} onRestored={onRefresh} />
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {refreshError && (
@@ -230,7 +265,7 @@ export function ActiveRunScreen({
 
       <div className="hmi-active-run__actions">
         <button type="button" className="hmi-primary-button" onClick={onHourlyUpdate}>
-          Hourly Update
+          {dueHours.length > 1 ? `Report Hours (${dueHours.length})` : 'Report Hour'}
         </button>
         <button type="button" className="hmi-secondary-button" onClick={onPlannedDowntime}>
           Planned Downtime
@@ -238,8 +273,13 @@ export function ActiveRunScreen({
         <button type="button" className="hmi-danger-button" onClick={onReportToEngineer}>
           Report to Engineer
         </button>
+        {onChangeTargetSpeed && (
+          <button type="button" className="hmi-secondary-button" onClick={onChangeTargetSpeed}>
+            Record Operating Speed
+          </button>
+        )}
         <button type="button" className="hmi-secondary-button" onClick={onCompleteRun}>
-          Complete Run
+          End Run
         </button>
         <button
           type="button"

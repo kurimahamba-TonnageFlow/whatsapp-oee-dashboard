@@ -1,3 +1,6 @@
+import { useEngineeringWrites } from './recovery'
+import { RecoveryPanel } from './RecoveryPanel'
+import { CasepackerQueue } from './CasepackerQueue'
 import { useMemo, useState } from 'react'
 import * as engineeringApi from './api'
 import { ApiRequestError } from '../../api/client'
@@ -23,10 +26,11 @@ interface WorkspaceProps {
 }
 
 function safeActionError(error: unknown, fallback: string): string {
-  return error instanceof ApiRequestError ? error.message : fallback
+  return error instanceof ApiRequestError && (error.status === 0 || error.status >= 500) ? 'Save not confirmed. Use Retry original action above.' : error instanceof Error ? error.message : fallback
 }
 
 export function Workspace({ token, engineerName, onLogout, onSessionExpired }: WorkspaceProps) {
+  const writes = useEngineeringWrites(engineerName, token)
   const { faults, isLoading, isRefreshing, loadError, refreshError, lastRefreshedAt, refresh } =
     useFaultPolling(token, onSessionExpired)
 
@@ -54,9 +58,9 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
   const [handoverError, setHandoverError] = useState<string | null>(null)
   const [handoverSuccessMessage, setHandoverSuccessMessage] = useState<string | null>(null)
 
-  const openFaults = useMemo(() => faults.filter((f) => f.production_status === 'Ongoing'), [faults])
+  const openFaults = useMemo(() => faults.filter((f) => f.engineering_status !== 'Resolved'), [faults])
   const myFaults = useMemo(() => openFaults.filter((f) => f.engineer === engineerName), [openFaults, engineerName])
-  const resolvedFaults = useMemo(() => faults.filter((f) => f.production_status === 'Resolved'), [faults])
+  const resolvedFaults = useMemo(() => faults.filter((f) => f.engineering_status === 'Resolved'), [faults])
 
   const selectedFault = faults.find((f) => f.downtime_event_id === selectedFaultId) ?? null
 
@@ -77,8 +81,7 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
     setIsAccepting(true)
     setAcceptError(null)
 
-    engineeringApi
-      .acceptFault(token, pendingAcceptFault.downtime_event_id)
+    writes.perform('fault', pendingAcceptFault.downtime_event_id, 'accept', {}, key => engineeringApi.acceptFault(token, pendingAcceptFault.downtime_event_id, undefined, key))
       .then((response) => {
         setPendingAcceptFault(null)
         setSelectedFaultId(response.downtime_event_id)
@@ -100,8 +103,7 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
     setUpdateError(null)
     setUpdateSuccessMessage(null)
 
-    engineeringApi
-      .addRepairUpdate(token, selectedFault.downtime_event_id, payload)
+    writes.perform('fault', selectedFault.downtime_event_id, 'update', payload, key => engineeringApi.addRepairUpdate(token, selectedFault.downtime_event_id, payload, undefined, key))
       .then(() => {
         setUpdateSuccessMessage('Repair update saved.')
         setUpdateResetSignal((n) => n + 1)
@@ -124,8 +126,7 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
     setCloseError(null)
     setCloseRefreshFailed(false)
 
-    engineeringApi
-      .closeFault(token, closing.downtime_event_id, payload)
+    writes.perform('fault', closing.downtime_event_id, 'close', payload, key => engineeringApi.closeFault(token, closing.downtime_event_id, payload, undefined, key))
       .then(async (response) => {
         // The backend has confirmed it. Dismiss the panel, say so, and
         // move to where the fault now lives - then take the authoritative
@@ -133,7 +134,7 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
         // a local counter.
         setSelectedFaultId(null)
         setCloseSuccessMessage(
-          `${closing.machine} — ${closing.reason} is now ${response.production_status}.`,
+          `${closing.machine} — ${closing.reason} is now ${response.engineering_status}.`,
         )
         setActiveTab('resolved')
 
@@ -157,8 +158,7 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
     setHandoverError(null)
     setHandoverSuccessMessage(null)
 
-    engineeringApi
-      .handOverFault(token, selectedFault.downtime_event_id, { note })
+    writes.perform('fault', selectedFault.downtime_event_id, 'handover', { note }, key => engineeringApi.handOverFault(token, selectedFault.downtime_event_id, { note }, undefined, key))
       .then(() => {
         setSelectedFaultId(null)
         setActiveTab('open')
@@ -221,6 +221,9 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
           </button>
         </div>
       </header>
+
+      <RecoveryPanel actor={engineerName} token={token} scope="fault" onSaved={() => { setSelectedFaultId(null); return refresh() }} onSessionExpired={onSessionExpired} />
+      <CasepackerQueue token={token} engineerName={engineerName} onSessionExpired={onSessionExpired} />
 
       {refreshError && (
         <p className="engineering-inline-error" role="alert">
@@ -295,6 +298,7 @@ export function Workspace({ token, engineerName, onLogout, onSessionExpired }: W
 
       {selectedFault && (
         <FaultDetailPanel
+          key={selectedFault.downtime_event_id}
           fault={selectedFault}
           currentEngineer={engineerName}
           onClose={closeDetailPanel}

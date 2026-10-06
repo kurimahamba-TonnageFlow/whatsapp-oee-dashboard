@@ -33,3 +33,7 @@ node_modules/
 # Stage 6B2A mocked visual-verification screenshots (local review only -
 # generated from fictional data against a mocked API, never committed)
 stage6b2_screenshots_tmp/
+
+# Local test caches and generated design previews
+.pytest_cache/
+frontend/design-reference/

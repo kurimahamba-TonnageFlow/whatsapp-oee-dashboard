@@ -143,12 +143,6 @@ export function validateStartRunForm(values: StartRunFormValues): StartRunFormEr
   )
   if (packsPerCaseError) errors.packsPerCase = packsPerCaseError
 
-  const targetSpeedError = validatePositive(
-    values.targetSpeedPpm,
-    'Enter a target speed greater than 0.',
-  )
-  if (targetSpeedError) errors.targetSpeedPpm = targetSpeedError
-
   const casesPerPalletError = validatePositive(
     values.casesPerPallet,
     'Enter cases per pallet greater than 0.',
@@ -166,6 +160,20 @@ export function validateStartRunForm(values: StartRunFormValues): StartRunFormEr
     'Cannot be negative.',
   )
   if (previousRunCompletedError) errors.previousRunCompleted = previousRunCompletedError
+
+  // StartRunRequest accepts integer counts. Catch fractional entries here,
+  // beside the field, before the operator reaches Confirm Start Run.
+  const wholeNumberFields = [
+    'packsPerCase',
+    'casesPerPallet',
+    'palletsRemaining',
+    'previousRunCompleted',
+  ] as const
+  for (const field of wholeNumberFields) {
+    if (!errors[field] && !Number.isSafeInteger(Number(values[field]))) {
+      errors[field] = 'Enter a whole number.'
+    }
+  }
 
   return errors
 }

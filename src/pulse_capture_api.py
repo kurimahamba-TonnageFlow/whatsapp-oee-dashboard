@@ -22,54 +22,76 @@
 
 from datetime import datetime, timezone
 from decimal import Decimal
-import hashlib
-import json
-from typing import Annotated, Literal
+from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Query
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 try:
+    from .api_idempotency import IdempotencyKey, build_idempotency, run_idempotent_write
+    from .api_logging import log_operation_failure
+    from . import management_auth
     from . import pulse_calculations as calc
     from .database import (
-        IdempotencyRequest,
-        IdempotentReplay,
         PulseCaptureError,
+        acknowledge_line_fault,
         complete_run_changeover,
+        end_line_stoppage,
         end_planned_downtime,
         get_completion_basis,
         get_hmi_run_state,
+        get_casepacker_requests,
         get_open_changeover,
+        get_open_line_faults,
         get_production_run_by_id,
+        get_run_hour_readings,
         record_hourly_update,
+        review_hourly_loss,
+        record_target_speed_change,
+        record_operating_speed_change,
+        reclassify_line_stoppage,
         record_xray_capture,
         report_fault_to_engineering,
+        restore_fault_production,
+        start_line_stoppage,
         start_planned_downtime,
         start_run_changeover,
     )
-    from .dashboard_reports import serialize_changeover
+    from .dashboard_reports import LINE_STOP_DOWNTIME_TYPE, serialize_changeover
+    from .factory_time import CLOCK_HOUR, clock_hour_label, clock_hours_between, is_clock_hour_start, clock_hour_start
     from .main import line_technicians_by_line
 except ImportError:
+    from api_idempotency import IdempotencyKey, build_idempotency, run_idempotent_write
+    from api_logging import log_operation_failure
+    import management_auth
     import pulse_calculations as calc
     from database import (
-        IdempotencyRequest,
-        IdempotentReplay,
         PulseCaptureError,
+        acknowledge_line_fault,
         complete_run_changeover,
+        end_line_stoppage,
         end_planned_downtime,
         get_completion_basis,
         get_hmi_run_state,
+        get_casepacker_requests,
         get_open_changeover,
+        get_open_line_faults,
         get_production_run_by_id,
+        get_run_hour_readings,
         record_hourly_update,
+        review_hourly_loss,
+        record_target_speed_change,
+        record_operating_speed_change,
+        reclassify_line_stoppage,
         record_xray_capture,
         report_fault_to_engineering,
+        restore_fault_production,
+        start_line_stoppage,
         start_planned_downtime,
         start_run_changeover,
     )
-    from dashboard_reports import serialize_changeover
+    from dashboard_reports import LINE_STOP_DOWNTIME_TYPE, serialize_changeover
+    from factory_time import CLOCK_HOUR, clock_hour_label, clock_hours_between, is_clock_hour_start, clock_hour_start
     from main import line_technicians_by_line
 
 
@@ -80,18 +102,6 @@ MAX_XRAY_PACK_COUNT = 10_000_000
 MAX_TEXT_LENGTH = 500
 MAX_SHORT_TEXT_LENGTH = 120
 CHANGEOVER_REASON = "Changeover"
-
-IdempotencyKey = Annotated[
-    str,
-    Header(
-        alias="Idempotency-Key",
-        min_length=16,
-        max_length=100,
-        pattern=r"^[A-Za-z0-9_-]+$",
-        description="Client-generated key, identical for every retry of one logical action.",
-    ),
-]
-
 
 def _now():
     return datetime.now(timezone.utc)
@@ -108,49 +118,9 @@ def _call(operation_name, func, *args, **kwargs):
     except PulseCaptureError as error:
         raise HTTPException(status_code=error.status_code, detail=error.message)
 
-    except Exception:
-        print("DATABASE ERROR")
-        print(f"HMI capture operation failed: {operation_name}")
+    except Exception as error:
+        log_operation_failure("hmi_capture", operation_name, error)
         raise safe_503()
-
-
-def build_idempotency(key, action, payload, status_code, to_body):
-    """payload: the validated request model. The fingerprint covers the
-    action (which includes the path id) and the full request body."""
-    canonical = json.dumps(
-        {"action": action, "payload": payload.model_dump(mode="json")},
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return IdempotencyRequest(
-        key=key,
-        action=action,
-        fingerprint=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
-        respond=lambda result: (status_code, jsonable_encoder(to_body(result))),
-    )
-
-
-def run_idempotent_write(operation_name, func, *args, idempotency):
-    try:
-        result = func(*args, idempotency=idempotency)
-
-    except IdempotentReplay as replay:
-        return JSONResponse(
-            status_code=replay.status_code,
-            content=replay.body,
-            headers={"Idempotent-Replayed": "true"},
-        )
-
-    except PulseCaptureError as error:
-        raise HTTPException(status_code=error.status_code, detail=error.message)
-
-    except Exception:
-        print("DATABASE ERROR")
-        print(f"HMI capture operation failed: {operation_name}")
-        raise safe_503()
-
-    status_code, body = idempotency.respond(result)
-    return JSONResponse(status_code=status_code, content=body)
 
 
 def load_run(run_id):
@@ -223,6 +193,9 @@ def _minutes(value):
 
 class HourlyUpdateRequest(BaseModel):
     line_technician: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
+    # The named factory clock hour this reading is for, as its start
+    # instant (e.g. "2026-01-12T06:00:00Z" for 06:00-07:00 GMT).
+    hour_start: datetime
     # Send as a string ("3.75") to keep exact decimal precision end to end.
     pallets_produced: Decimal = Field(ge=0, le=MAX_PALLETS_PER_UPDATE, decimal_places=4)
     other_loss_reason: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
@@ -231,6 +204,15 @@ class HourlyUpdateRequest(BaseModel):
     @classmethod
     def required_text(cls, value):
         return strip_required(value)
+
+    @field_validator("hour_start")
+    @classmethod
+    def whole_clock_hour(cls, value):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("hour_start must include a time zone.")
+        if not is_clock_hour_start(value):
+            raise ValueError("hour_start must be the start of a clock hour.")
+        return value.astimezone(timezone.utc)
 
     @field_validator("other_loss_reason")
     @classmethod
@@ -246,8 +228,11 @@ def hourly_update_api(saved):
     return {
         "status": "success",
         "hourly_update_id": saved["hourly_update_id"],
+        "loss_review": saved.get("loss_review"),
         "production_run_id": saved["production_run_id"],
         "production_line": saved["production_line"],
+        "hour_start": saved["hour_start"],
+        "hour_label": saved["hour_label"],
         "shift": saved["shift"],
         "shift_window_start": saved["shift_window_start"],
         "period_started_at": saved["period_started_at"],
@@ -270,6 +255,13 @@ def hourly_update_api(saved):
     }
 
 
+@router.post("/runs/{run_id}/hourly-loss-review")
+def hourly_loss_review(run_id: int, payload: HourlyUpdateRequest):
+    run = load_run(run_id)
+    require_line_technician(run["production_line"], payload.line_technician)
+    return _call("review_hourly_loss", review_hourly_loss, run_id, payload.hour_start, payload.pallets_produced, _now())
+
+
 @router.post("/runs/{run_id}/hourly-updates", status_code=201)
 def submit_hourly_update(run_id: int, payload: HourlyUpdateRequest, idempotency_key: IdempotencyKey):
     run = load_run(run_id)
@@ -283,6 +275,7 @@ def submit_hourly_update(run_id: int, payload: HourlyUpdateRequest, idempotency_
         "record_hourly_update",
         record_hourly_update,
         run_id,
+        payload.hour_start,
         payload.pallets_produced,
         payload.line_technician,
         payload.other_loss_reason,
@@ -409,6 +402,36 @@ def finish_planned_downtime(
 # ==========================================================
 
 
+class ProductionRestoreRequest(BaseModel):
+    production_line: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
+    technician: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
+    note: str = Field(max_length=MAX_TEXT_LENGTH)
+    restored_at: datetime
+
+    @field_validator("production_line", "technician", "note")
+    @classmethod
+    def required_text(cls, value):
+        return strip_required(value)
+
+    @field_validator("restored_at")
+    @classmethod
+    def aware_time(cls, value):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("Restart time must include a time zone.")
+        return value
+
+
+@router.post("/faults/{fault_id}/production-restored")
+def restore_production(fault_id: int, payload: ProductionRestoreRequest, idempotency_key: IdempotencyKey):
+    require_line_technician(payload.production_line, payload.technician)
+    idempotency = build_idempotency(idempotency_key, f"production_restore:{fault_id}", payload, 200, lambda row: row)
+    return run_idempotent_write(
+        "restore_fault_production", restore_fault_production, fault_id,
+        payload.production_line, payload.technician, payload.note, payload.restored_at,
+        _now(), idempotency=idempotency,
+    )
+
+
 class FaultReportRequest(BaseModel):
     """machine_id / button_id are the Management-configured machine and
     fault button (GET /api/v1/hmi/config). When no configured fault
@@ -420,6 +443,16 @@ class FaultReportRequest(BaseModel):
     machine_id: int | None = Field(default=None, ge=1)
     button_id: int | None = Field(default=None, ge=1)
     note: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
+    outcome: Literal["call_engineer", "resolved"] = "call_engineer"
+    started_at: datetime | None = None
+    restored_at: datetime | None = None
+
+    @field_validator("started_at", "restored_at")
+    @classmethod
+    def timezone_required(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("Downtime times must include a time zone.")
+        return value
 
     @field_validator("reported_by", "machine", "reason")
     @classmethod
@@ -433,6 +466,13 @@ class FaultReportRequest(BaseModel):
 
     @model_validator(mode="after")
     def button_and_note_rules(self):
+        if self.outcome == "resolved":
+            if self.started_at is None or self.restored_at is None or not self.note:
+                raise ValueError("Resolved downtime needs start time, restart time and repair details.")
+            if self.restored_at < self.started_at:
+                raise ValueError("Restart cannot be before the stop started.")
+        elif self.started_at is not None or self.restored_at is not None:
+            raise ValueError("Use the resolved option to report an already completed stop.")
         if self.button_id is not None and self.machine_id is None:
             raise ValueError("A fault button can only be sent together with its machine_id.")
         if self.button_id is None and self.note is None:
@@ -494,6 +534,7 @@ class XrayCountRequest(BaseModel):
 
     line_technician: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
     production_since_last_update: bool
+    other_loss_reason: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
     final_pallets_produced: Decimal | None = Field(
         default=None, gt=0, le=MAX_PALLETS_PER_UPDATE, decimal_places=4
     )
@@ -538,6 +579,7 @@ class XrayCountRequest(BaseModel):
         return {
             "line_technician": self.line_technician,
             "final_pallets_produced": self.final_pallets_produced,
+            "other_loss_reason": self.other_loss_reason,
             "count_available": not self.count_unavailable,
             "xray_pack_count": self.xray_pack_count,
             "unavailable_reason": self.unavailable_reason,
@@ -567,6 +609,7 @@ def xray_capture_api(saved):
         "shift": saved["shift"],
         "captured_at": saved["captured_at"],
         "final_hourly_update_id": None if final is None else final["hourly_update_id"],
+        "loss_review": None if final is None else final.get("loss_review"),
         "final_pallets_produced": None if final is None else _pallets(final["actual_pallets"]),
         "total_pallets_recorded": _pallets(saved["total_pallets_recorded"]),
         "count_available": saved["count_available"],
@@ -662,6 +705,8 @@ def completion_preview(run_id: int, payload: XrayCountRequest):
         # than letting them commit and be rejected.
         "can_complete": status != "data_quality_warning",
         "blocking_reason": summary["warning"] if status == "data_quality_warning" else None,
+        "loss_review": _call("review_hourly_loss", review_hourly_loss, run_id, clock_hour_start(_now()),
+                             payload.final_pallets_produced or Decimal(0), _now(), final=True),
         "saved": False,
     }
 
@@ -838,6 +883,8 @@ def hmi_run_state(run_id: int):
             "packs_per_case": run["packs_per_case"],
             "cases_per_pallet": run["cases_per_pallet"],
             "target_speed_ppm": calc.as_number(run["target_speed_ppm"], calc.PACKS_PLACES),
+            "standard_speed_ppm": calc.as_number(run.get("standard_speed_ppm"), calc.PACKS_PLACES),
+            "standard_version_id": run.get("standard_version_id"),
             "status": run["status"],
             "started_at": run["started_at"],
             "finished_at": run["finished_at"],
@@ -876,4 +923,472 @@ def hmi_run_state(run_id: int):
         "open_changeover": (
             None if state["open_changeover"] is None else serialize_changeover(state["open_changeover"])
         ),
+        "target_speed_changes": [speed_change_api(change) for change in state.get("speed_changes", [])],
+        "operating_speed_changes": [speed_change_api(change) for change in state.get("operating_changes", [])],
+        "hours": run_hours_api(run, {h: None for h in state.get("reported_hours", [])}, now),
+        "line_faults": [line_fault_api(fault) for fault in state.get("line_faults", [])],
     }
+
+
+# ==========================================================
+# FIXED CLOCK HOURS (what the HMI asks the technician for)
+# ==========================================================
+
+
+def run_hours_api(run, readings, now):
+    """Every clock hour the run has been open in, oldest first:
+    `reported`, `due` (finished and not yet reported - each missed hour
+    is asked for on its own) or `in_progress` (the current hour; it is
+    reported after it ends, or as the final part hour at End Run).
+    `readings` maps hour_start -> pallets (or None when only the fact of
+    a reading is known)."""
+    end = run["finished_at"] or now
+    items = []
+    for hour_start in clock_hours_between(run["started_at"], end):
+        window = calc.reading_window(hour_start, run["started_at"], run["finished_at"])
+        if window is None:
+            continue
+        start, final_end = window
+        finished = run["finished_at"] is not None or hour_start + CLOCK_HOUR <= now
+        if hour_start in readings:
+            status = "reported"
+        elif finished:
+            status = "due"
+        else:
+            status = "in_progress"
+        minutes = calc.minutes_between(start, min(final_end, now))
+        items.append(
+            {
+                "hour_start": hour_start,
+                "hour_end": hour_start + CLOCK_HOUR,
+                "hour_label": clock_hour_label(hour_start),
+                "status": status,
+                "pallets_produced": _pallets(readings.get(hour_start)),
+                "applicable_minutes": _minutes(minutes),
+                "is_partial_hour": calc.minutes_between(start, final_end) < calc.SIXTY,
+            }
+        )
+
+    due = [item for item in items if item["status"] == "due"]
+    current = next((item for item in items if item["status"] == "in_progress"), None)
+    return {
+        "hours": items,
+        "due_count": len(due),
+        "next_due_hour": due[0] if due else None,
+        "current_hour": current,
+    }
+
+
+@router.get("/runs/{run_id}/hours")
+def run_hours(run_id: int):
+    """Read-only. The HMI asks for each `due` hour separately."""
+    data = _call("get_run_hour_readings", get_run_hour_readings, run_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"Production Run {run_id} was not found.")
+    readings = {row["hour_start"]: row["pallets_completed"] for row in data["readings"]}
+    return {"production_run_id": run_id, **run_hours_api(data["run"], readings, _now())}
+
+
+# ==========================================================
+# TARGET SPEED CHANGE (mid-run, forward only)
+# ==========================================================
+
+
+class TargetSpeedChangeRequest(BaseModel):
+    line_technician: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
+    new_target_speed_ppm: Decimal = Field(gt=0, le=Decimal(10_000), decimal_places=4)
+    reason: str = Field(max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("line_technician", "reason")
+    @classmethod
+    def required_text(cls, value):
+        return strip_required(value)
+
+
+def speed_change_api(change):
+    return {
+        "change_id": change.get("id"),
+        "previous_speed_ppm": calc.as_number(change["previous_speed_ppm"], calc.PACKS_PLACES),
+        "new_speed_ppm": calc.as_number(change["new_speed_ppm"], calc.PACKS_PLACES),
+        "reason": change.get("reason"),
+        "changed_by": change.get("changed_by"),
+        "effective_at": change["effective_at"],
+        "submitted_at": change.get("submitted_at"),
+        "supersedes_id": change.get("supersedes_id"),
+    }
+
+
+@router.post("/runs/{run_id}/target-speed", status_code=201)
+def change_target_speed(run_id: int, payload: TargetSpeedChangeRequest, idempotency_key: IdempotencyKey):
+    run = load_run(run_id)
+    require_line_technician(run["production_line"], payload.line_technician)
+
+    idempotency = build_idempotency(
+        idempotency_key,
+        f"target_speed:{run_id}",
+        payload,
+        201,
+        lambda saved: {"status": "success", "production_run_id": run_id, **speed_change_api(saved)},
+    )
+    return run_idempotent_write(
+        "record_target_speed_change",
+        record_target_speed_change,
+        run_id,
+        payload.new_target_speed_ppm,
+        payload.reason,
+        payload.line_technician,
+        _now(),
+        idempotency=idempotency,
+    )
+
+
+class OperatingSpeedChangeRequest(BaseModel):
+    line_technician: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LENGTH)
+    new_operating_speed_ppm: Decimal = Field(ge=0, le=Decimal(10_000), decimal_places=4)
+    reason: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    effective_at: datetime | None = None
+    supersedes_id: int | None = Field(default=None, gt=0)
+
+    @field_validator("line_technician", "reason")
+    @classmethod
+    def required_text(cls, value):
+        return strip_required(value)
+
+    @field_validator("effective_at")
+    @classmethod
+    def aware_time(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("Effective time must include its timezone.")
+        return value
+
+
+@router.post("/runs/{run_id}/operating-speed", status_code=201)
+def change_operating_speed(run_id: int, payload: OperatingSpeedChangeRequest, idempotency_key: IdempotencyKey):
+    run = load_run(run_id)
+    # HMI currently has no authenticated person: retain the validated reporting technician.
+    require_line_technician(run["production_line"], payload.line_technician)
+    idempotency = build_idempotency(idempotency_key, f"operating_speed:{run_id}", payload, 201,
+        lambda saved: {"status": "success", "production_run_id": run_id, **speed_change_api(saved)})
+    return run_idempotent_write("record_operating_speed_change", record_operating_speed_change,
+        run_id, payload.new_operating_speed_ppm, payload.reason, payload.line_technician,
+        payload.effective_at, _now(), payload.supersedes_id, idempotency=idempotency)
+
+
+# ==========================================================
+# END RUN -> CHANGEOVER / OTHER (line stoppages between runs)
+# ==========================================================
+
+
+class LineStoppageStartRequest(BaseModel):
+    casepacker_required: bool = False
+    casepacker_details: str | None = Field(default=None, max_length=500)
+    kind: Literal["changeover", "other", "handover", "not_scheduled"]
+    started_by: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
+    reason: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("started_by")
+    @classmethod
+    def required_text(cls, value):
+        return strip_required(value)
+
+    @field_validator("reason")
+    @classmethod
+    def optional_text(cls, value):
+        return strip_optional(value)
+
+    @model_validator(mode="after")
+    def other_needs_a_reason(self):
+        if self.kind == "other" and not self.reason:
+            raise ValueError("Write the reason the line is stopped.")
+        if self.casepacker_required:
+            if self.kind != "changeover":
+                raise ValueError("Casepacker work must be linked to a changeover.")
+            if not self.casepacker_details or not self.casepacker_details.strip():
+                raise ValueError("Describe the required casepacker format or program change.")
+            self.casepacker_details = self.casepacker_details.strip()
+        elif self.casepacker_details:
+            raise ValueError("Select casepacker change required before adding details.")
+        return self
+
+
+class ManagerNextStepRequest(BaseModel):
+    kind: Literal["changeover", "other", "handover", "not_scheduled"]
+    reason: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("reason")
+    @classmethod
+    def optional_text(cls, value):
+        return strip_optional(value)
+
+    @model_validator(mode="after")
+    def other_needs_a_reason(self):
+        if self.kind == "other" and not self.reason:
+            raise ValueError("Write the reason the line is stopped.")
+        return self
+
+
+class LineStoppageEndRequest(BaseModel):
+    ended_by: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
+
+    @field_validator("ended_by")
+    @classmethod
+    def required_text(cls, value):
+        return strip_required(value)
+
+
+def _span(start, end):
+    return None if start is None or end is None else _minutes(calc.minutes_between(start, end))
+
+
+def line_stoppage_api(result, now=None):
+    """Changeover times: physical (Changeover -> End Changeover), new-run
+    setup (End Changeover -> new run starts) and total (both, counted
+    once against the line). A Handover records both technicians:
+    started_by = outgoing, ended_by = incoming. Resolving an Other stop
+    also returns the Restart delay it started."""
+    body = _line_stoppage_body(result["stoppage"])
+    body["changeover"] = None if result.get("changeover") is None else serialize_changeover(result["changeover"])
+    delay = result.get("restart_delay")
+    body["restart_delay"] = None if delay is None else _line_stoppage_body(delay)
+    audit = result.get("reclassification")
+    if audit is not None:
+        body["reclassification"] = {
+            "reclassification_id": audit["id"],
+            "previous_kind": audit["previous_kind"],
+            "previous_reason": audit["previous_reason"],
+            "new_kind": audit["new_kind"],
+            "new_reason": audit["new_reason"],
+            "changed_by": audit["changed_by"],
+            "changed_at": audit["changed_at"],
+            "note": audit["note"],
+        }
+    return body
+
+
+def _line_stoppage_body(stoppage):
+    is_open = stoppage["ended_at"] is None
+    physical_end = stoppage.get("physical_ended_at")
+    return {
+        "status": "success",
+        "stoppage_id": stoppage["id"],
+        "production_line": stoppage["production_line"],
+        "kind": stoppage["kind"],
+        # Changeover and Handover are planned; Other and Restart delay are
+        # unplanned; Not scheduled is neither.
+        "downtime_type": LINE_STOP_DOWNTIME_TYPE.get(stoppage["kind"], "unplanned"),
+        "reason": stoppage["reason"],
+        "previous_production_run_id": stoppage["previous_production_run_id"],
+        "next_production_run_id": stoppage["next_production_run_id"],
+        "follows_stoppage_id": stoppage.get("follows_stoppage_id"),
+        "started_by": stoppage["started_by"],
+        "started_at": stoppage["started_at"],
+        "ended_by": stoppage["ended_by"],
+        "ended_at": stoppage["ended_at"],
+        "duration_minutes": _minutes(stoppage["duration_minutes"]),
+        "physical_ended_at": physical_end,
+        "physical_ended_by": stoppage.get("physical_ended_by"),
+        "physical_minutes": _span(stoppage["started_at"], physical_end),
+        "setup_minutes": _span(physical_end, stoppage["ended_at"]),
+        "total_minutes": _span(stoppage["started_at"], stoppage["ended_at"]),
+        "is_active": is_open,
+    }
+
+
+@router.post("/lines/{production_line}/stoppages", status_code=201)
+def begin_line_stoppage(production_line: str, payload: LineStoppageStartRequest, idempotency_key: IdempotencyKey):
+    _require_known_line(production_line)
+    require_line_technician(production_line, payload.started_by)
+
+    idempotency = build_idempotency(
+        idempotency_key, f"line_stoppage:{production_line}", payload, 201, line_stoppage_api
+    )
+    return run_idempotent_write(
+        "start_line_stoppage",
+        start_line_stoppage,
+        production_line,
+        payload.kind,
+        payload.reason,
+        payload.started_by,
+        _now(),
+        *([payload.casepacker_details] if payload.casepacker_required else []),
+        idempotency=idempotency,
+    )
+
+
+@router.post("/lines/{production_line}/next-step/manager", status_code=201)
+def manager_next_step(
+    production_line: str,
+    payload: ManagerNextStepRequest,
+    idempotency_key: IdempotencyKey,
+    manager_name: str = Depends(management_auth.require_management_session),
+):
+    """An authorised manager records what happened after a run whose End
+    Run choice was never made - e.g. days later. Same rules as the HMI
+    choice: one choice per ended run, and the event starts when that run
+    ended. The manager is recorded as '<name> (manager)'."""
+    _require_known_line(production_line)
+    idempotency = build_idempotency(
+        idempotency_key, f"line_next_step_manager:{production_line}", payload, 201, line_stoppage_api
+    )
+    return run_idempotent_write(
+        "start_line_stoppage",
+        start_line_stoppage,
+        production_line,
+        payload.kind,
+        payload.reason,
+        f"{manager_name} (manager)",
+        _now(),
+        idempotency=idempotency,
+    )
+
+
+class LineStoppageReclassifyRequest(BaseModel):
+    new_kind: Literal["handover", "other", "not_scheduled", "restart_delay"]
+    reason: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
+    note: str = Field(max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("reason")
+    @classmethod
+    def optional_text(cls, value):
+        return strip_optional(value)
+
+    @field_validator("note")
+    @classmethod
+    def required_text(cls, value):
+        return strip_required(value)
+
+    @model_validator(mode="after")
+    def other_needs_a_reason(self):
+        if self.new_kind == "other" and not self.reason:
+            raise ValueError("Write the reason the line was stopped.")
+        return self
+
+
+@router.post("/line-stoppages/{stoppage_id}/reclassify")
+def reclassify_stoppage(
+    stoppage_id: int,
+    payload: LineStoppageReclassifyRequest,
+    idempotency_key: IdempotencyKey,
+    manager_name: str = Depends(management_auth.require_management_session),
+):
+    """An authorised manager corrects a line stop's classification (e.g.
+    Other -> Not scheduled). The stop stays one interval; the previous
+    and new classification, who, when and why are kept in the audit
+    trail, and every report recalculates from the corrected row."""
+    idempotency = build_idempotency(
+        idempotency_key, f"line_stoppage_reclassify:{stoppage_id}", payload, 200, line_stoppage_api
+    )
+    return run_idempotent_write(
+        "reclassify_line_stoppage",
+        reclassify_line_stoppage,
+        stoppage_id,
+        payload.new_kind,
+        payload.reason,
+        manager_name,
+        payload.note,
+        _now(),
+        idempotency=idempotency,
+    )
+
+
+@router.post("/line-stoppages/{stoppage_id}/end")
+def finish_line_stoppage(stoppage_id: int, payload: LineStoppageEndRequest, idempotency_key: IdempotencyKey):
+    _require_known_technician(payload.ended_by)
+
+    idempotency = build_idempotency(
+        idempotency_key, f"line_stoppage_end:{stoppage_id}", payload, 200, line_stoppage_api
+    )
+    return run_idempotent_write(
+        "end_line_stoppage",
+        end_line_stoppage,
+        stoppage_id,
+        payload.ended_by,
+        _now(),
+        idempotency=idempotency,
+    )
+
+
+# ==========================================================
+# CARRIED FAULTS: acknowledge and escalate
+# ==========================================================
+
+
+def line_fault_api(fault):
+    return {
+        "downtime_event_id": fault["downtime_event_id"],
+        "production_run_id": fault["production_run_id"],
+        "fault_id": fault["fault_id"],
+        "machine": fault["machine"],
+        "reason": fault["reason"],
+        "reported_by": fault["reported_by"],
+        "engineer": fault["engineer"],
+        "engineering_status": fault["engineering_status"],
+        "opened_at": fault["opened_at"],
+        "escalation_count": fault["escalation_count"],
+        "last_escalated_at": fault["last_escalated_at"],
+        "last_escalated_by": fault["last_escalated_by"],
+        "acknowledged": fault["acknowledged"],
+    }
+
+
+@router.get("/lines/{production_line}/open-faults")
+def open_line_faults(production_line: str):
+    """Faults still open on the line from any run. `acknowledged` means
+    acknowledged since the last run on the line ended."""
+    _require_known_line(production_line)
+    data = _call("get_open_line_faults", get_open_line_faults, production_line)
+    faults = [line_fault_api(fault) for fault in data["faults"]]
+    return {
+        "production_line": production_line,
+        "handover_at": data["handover_at"],
+        "faults": faults,
+        "unacknowledged_count": sum(1 for fault in faults if not fault["acknowledged"]),
+    }
+
+
+class FaultAcknowledgeRequest(BaseModel):
+    production_line: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
+    acknowledged_by: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
+    note: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("production_line", "acknowledged_by")
+    @classmethod
+    def required_text(cls, value):
+        return strip_required(value)
+
+    @field_validator("note")
+    @classmethod
+    def optional_text(cls, value):
+        return strip_optional(value)
+
+
+@router.post("/faults/{downtime_event_id}/acknowledge")
+def acknowledge_fault(downtime_event_id: int, payload: FaultAcknowledgeRequest, idempotency_key: IdempotencyKey):
+    """Acknowledge AND escalate: updates the existing fault's escalation
+    fields. It never creates a new fault."""
+    _require_known_line(payload.production_line)
+    require_line_technician(payload.production_line, payload.acknowledged_by)
+
+    idempotency = build_idempotency(
+        idempotency_key,
+        f"fault_acknowledge:{downtime_event_id}",
+        payload,
+        200,
+        lambda saved: {"status": "success", "escalated": True, **saved},
+    )
+    return run_idempotent_write(
+        "acknowledge_line_fault",
+        acknowledge_line_fault,
+        downtime_event_id,
+        payload.production_line,
+        payload.acknowledged_by,
+        payload.note,
+        _now(),
+        idempotency=idempotency,
+    )
+
+
+@router.get("/line-stoppages/{stoppage_id}/casepacker")
+def casepacker_status(stoppage_id: int):
+    items = _call("get_casepacker_requests", get_casepacker_requests, stoppage_id)
+    return {"request": items[0] if items else None}

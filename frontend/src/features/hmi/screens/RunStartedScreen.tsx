@@ -25,7 +25,7 @@ export function RunStartedScreen({ values, onContinue }: RunStartedScreenProps) 
           <dd>{values.lineTechnician}</dd>
         </div>
         <div className="hmi-review-list__row">
-          <dt>Target speed</dt>
+          <dt>Management standard</dt>
           <dd>{values.targetSpeedPpm} packs/min</dd>
         </div>
         <div className="hmi-review-list__row">

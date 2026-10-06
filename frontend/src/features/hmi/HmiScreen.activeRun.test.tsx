@@ -5,7 +5,7 @@ import { HmiScreen } from './HmiScreen'
 import * as hmiApi from './api'
 import { ApiRequestError } from '../../api/client'
 import { saveActiveRun } from './activeRunStorage'
-import { HMI_CONFIG, changeover, plannedDowntimeEvent, runState } from './hmiTestState'
+import { HMI_CONFIG, HOURS_ONE_DUE, changeover, plannedDowntimeEvent, runState } from './hmiTestState'
 import type { HourlyUpdateResponse } from './types'
 
 vi.mock('./api')
@@ -14,6 +14,7 @@ const MOCKED = [
   'getHmiConfig',
   'getRunState',
   'submitHourlyUpdate',
+  'reviewHourlyLoss',
   'startPlannedDowntime',
   'endPlannedDowntime',
   'completeRun',
@@ -30,6 +31,7 @@ afterEach(() => {
 })
 
 beforeEach(() => {
+  vi.mocked(hmiApi.reviewHourlyLoss).mockResolvedValue({ target_packs: 7200, remaining_gap_packs: 0, equivalent_minutes: 0, prompt_required: false })
   vi.mocked(hmiApi.getHmiConfig).mockResolvedValue(HMI_CONFIG)
 })
 
@@ -39,6 +41,8 @@ function hourlyResponse(overrides: Partial<HourlyUpdateResponse> = {}): HourlyUp
     hourly_update_id: 77,
     production_run_id: 99,
     production_line: 'Rovema',
+    hour_start: '2026-01-12T07:00:00+00:00',
+    hour_label: '07:00–08:00',
     shift: 'Day',
     period_started_at: '2026-01-12T07:05:00+00:00',
     period_ended_at: '2026-01-12T08:05:00+00:00',
@@ -272,14 +276,14 @@ describe('Active-run recovery', () => {
     vi.setSystemTime(new Date('2026-01-12T08:11:00Z'))
     try {
       saveActiveRun({ runId: 99, productionLine: 'Rovema' })
-      vi.mocked(hmiApi.getRunState).mockResolvedValue(runState())
+      vi.mocked(hmiApi.getRunState).mockResolvedValue(runState({ hours: HOURS_ONE_DUE }))
 
       renderHmi()
       await act(async () => {
         await Promise.resolve()
       })
 
-      expect(screen.getByText('Hourly update due')).toBeInTheDocument()
+      expect(screen.getByText('Hourly update due: 07:00–08:00')).toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }
@@ -291,10 +295,31 @@ describe('Active-run recovery', () => {
 // ==========================================================
 
 describe('Hourly Update', () => {
-  async function openHourlyUpdate(state = runState()) {
+  it('asks about residual loss and can record an unknown cause without inventing a reason', async () => {
+    vi.mocked(hmiApi.reviewHourlyLoss).mockResolvedValue({ target_packs: 6000, remaining_gap_packs: 2800, equivalent_minutes: 28, prompt_required: true })
+    vi.mocked(hmiApi.submitHourlyUpdate).mockResolvedValue(hourlyResponse())
+    const input = await openHourlyUpdate()
+    fireEvent.change(input, { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00/i }))
+    await screen.findByText('28 minutes')
+    expect(hmiApi.submitHourlyUpdate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /cause unknown/i }))
+    await waitFor(() => expect(hmiApi.submitHourlyUpdate).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(hmiApi.submitHourlyUpdate).mock.calls[0][1].other_loss_reason).toBeUndefined()
+  })
+
+  it('does not submit a reading when the loss review is unavailable', async () => {
+    vi.mocked(hmiApi.reviewHourlyLoss).mockRejectedValue(new Error('unavailable'))
+    const input = await openHourlyUpdate()
+    fireEvent.change(input, { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00/i }))
+    await screen.findByText(/could not check the output gap/i)
+    expect(hmiApi.submitHourlyUpdate).not.toHaveBeenCalled()
+  })
+  async function openHourlyUpdate(state = runState({ hours: HOURS_ONE_DUE })) {
     await renderActiveRun(state)
-    fireEvent.click(screen.getByRole('button', { name: /hourly update/i }))
-    return screen.getByLabelText(/pallets produced this period/i)
+    fireEvent.click(screen.getByRole('button', { name: /report hour/i }))
+    return screen.getByLabelText(/pallets produced 07:00–08:00/i)
   }
 
   it('submits a decimal value as an exact string and shows the confirmed backend figures', async () => {
@@ -302,15 +327,19 @@ describe('Hourly Update', () => {
     const input = await openHourlyUpdate()
 
     fireEvent.change(input, { target: { value: '3.75' } })
-    fireEvent.click(screen.getByRole('button', { name: /confirm update/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00–08:00/i }))
 
-    await waitFor(() => expect(screen.getByText('✓ Update recorded')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('✓ 07:00–08:00 recorded')).toBeInTheDocument())
 
     const [runId, payload, key] = vi.mocked(hmiApi.submitHourlyUpdate).mock.calls[0]
     expect(runId).toBe(99)
-    expect(payload).toEqual({ line_technician: 'Liam', pallets_produced: '3.75' })
+    expect(payload).toEqual({
+      line_technician: 'Liam',
+      hour_start: '2026-01-12T07:00:00+00:00',
+      pallets_produced: '3.75',
+    })
     expect(key).toMatch(/^k-[A-Za-z0-9_-]{14,}$/)
-    expect(screen.getByText('7.5 pallets')).toBeInTheDocument()
+    expect(screen.getAllByText('91.7%')).toHaveLength(2)
   })
 
   it('accepts zero pallets', async () => {
@@ -320,17 +349,31 @@ describe('Hourly Update', () => {
     const input = await openHourlyUpdate()
 
     fireEvent.change(input, { target: { value: '0' } })
-    fireEvent.click(screen.getByRole('button', { name: /confirm update/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00–08:00/i }))
 
-    await waitFor(() => expect(screen.getByText('✓ Update recorded')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('✓ 07:00–08:00 recorded')).toBeInTheDocument())
     expect(vi.mocked(hmiApi.submitHourlyUpdate).mock.calls[0][1].pallets_produced).toBe('0')
+  })
+
+  it('saves an hourly loss explanation even when a planned stop exists', async () => {
+    vi.mocked(hmiApi.submitHourlyUpdate).mockResolvedValue(hourlyResponse())
+    const input = await openHourlyUpdate(runState({ hours: HOURS_ONE_DUE, open_planned_downtime: plannedDowntimeEvent() }))
+    fireEvent.change(input, { target: { value: '1.25' } })
+    fireEvent.change(screen.getByLabelText(/other output loss this hour/i), {
+      target: { value: '  Slow feeding after the film change  ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00–08:00/i }))
+    await waitFor(() => expect(hmiApi.submitHourlyUpdate).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(hmiApi.submitHourlyUpdate).mock.calls[0][1]).toMatchObject({
+      pallets_produced: '1.25', other_loss_reason: 'Slow feeding after the film change',
+    })
   })
 
   it.each(['-1', 'abc', '1.23456', ''])('rejects %s without calling the API', async (value) => {
     const input = await openHourlyUpdate()
 
     fireEvent.change(input, { target: { value } })
-    fireEvent.click(screen.getByRole('button', { name: /confirm update/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00–08:00/i }))
 
     expect(await screen.findByRole('alert')).toBeInTheDocument()
     expect(hmiApi.submitHourlyUpdate).not.toHaveBeenCalled()
@@ -346,12 +389,12 @@ describe('Hourly Update', () => {
     const input = await openHourlyUpdate()
 
     fireEvent.change(input, { target: { value: '2' } })
-    const confirm = screen.getByRole('button', { name: /confirm update/i })
+    const confirm = screen.getByRole('button', { name: /save 07:00–08:00/i })
     fireEvent.click(confirm)
     fireEvent.click(confirm)
     fireEvent.click(confirm)
 
-    expect(hmiApi.submitHourlyUpdate).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(hmiApi.submitHourlyUpdate).toHaveBeenCalledTimes(1))
 
     await act(async () => {
       resolve(hourlyResponse())
@@ -364,15 +407,15 @@ describe('Hourly Update', () => {
     const input = await openHourlyUpdate()
 
     fireEvent.change(input, { target: { value: '3.75' } })
-    fireEvent.click(screen.getByRole('button', { name: /confirm update/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00–08:00/i }))
 
-    await waitFor(() => expect(screen.getByText(/nothing was saved/i)).toBeInTheDocument())
-    expect(screen.getByLabelText(/pallets produced this period/i)).toHaveValue('3.75')
+    await waitFor(() => expect(screen.getByText(/may already have saved/i)).toBeInTheDocument())
+    expect(screen.getByLabelText(/pallets produced 07:00–08:00/i)).toHaveValue('3.75')
 
     vi.mocked(hmiApi.submitHourlyUpdate).mockResolvedValueOnce(hourlyResponse())
-    fireEvent.click(screen.getByRole('button', { name: /confirm update/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00–08:00/i }))
 
-    await waitFor(() => expect(screen.getByText('✓ Update recorded')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('✓ 07:00–08:00 recorded')).toBeInTheDocument())
     const calls = vi.mocked(hmiApi.submitHourlyUpdate).mock.calls
     expect(calls).toHaveLength(2)
     expect(calls[0][2]).toBe(calls[1][2])
@@ -383,18 +426,13 @@ describe('Hourly Update', () => {
     const input = await openHourlyUpdate()
 
     fireEvent.change(input, { target: { value: '2' } })
-    fireEvent.click(screen.getByRole('button', { name: /confirm update/i }))
-    await waitFor(() => expect(screen.getByText('✓ Update recorded')).toBeInTheDocument())
-    await waitFor(
-      () => expect(screen.getByRole('heading', { name: 'Rovema' })).toBeInTheDocument(),
-      { timeout: 3000 },
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: /hourly update/i }))
-    fireEvent.change(screen.getByLabelText(/pallets produced this period/i), {
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00–08:00/i }))
+    await waitFor(() => expect(screen.getByText('✓ 07:00–08:00 recorded')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /back to the run|next missed hour/i }))
+    fireEvent.change(screen.getByLabelText(/pallets produced 07:00–08:00/i), {
       target: { value: '1' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /confirm update/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00–08:00/i }))
 
     await waitFor(() => expect(hmiApi.submitHourlyUpdate).toHaveBeenCalledTimes(2))
     const calls = vi.mocked(hmiApi.submitHourlyUpdate).mock.calls
@@ -408,22 +446,22 @@ describe('Hourly Update', () => {
     updated.run.pallets_remaining = 30.5
 
     saveActiveRun({ runId: 99, productionLine: 'Rovema' })
-    vi.mocked(hmiApi.getRunState).mockResolvedValueOnce(runState()).mockResolvedValue(updated)
+    vi.mocked(hmiApi.getRunState)
+      .mockResolvedValueOnce(runState({ hours: HOURS_ONE_DUE }))
+      .mockResolvedValue(updated)
 
     renderHmi()
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Rovema' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: /hourly update/i }))
-    fireEvent.change(screen.getByLabelText(/pallets produced this period/i), {
+    fireEvent.click(screen.getByRole('button', { name: /report hour/i }))
+    fireEvent.change(screen.getByLabelText(/pallets produced 07:00–08:00/i), {
       target: { value: '3.75' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /confirm update/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00–08:00/i }))
 
     await waitFor(() => expect(hmiApi.getRunState).toHaveBeenCalledTimes(2))
-    await waitFor(
-      () => expect(screen.getByRole('heading', { name: 'Rovema' })).toBeInTheDocument(),
-      { timeout: 3000 },
-    )
+    fireEvent.click(await screen.findByRole('button', { name: /back to the run/i }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Rovema' })).toBeInTheDocument())
     expect(screen.getByText('7.5')).toBeInTheDocument()
   })
 
@@ -434,27 +472,24 @@ describe('Hourly Update', () => {
         kind: 'hourlyUpdate',
         key: 'k-pending-0000000000000001',
         runId: 99,
-        label: 'An hourly update of 3.75 pallets',
-        payload: { palletsProduced: '3.75' },
+        label: '3.75 pallets for 07:00–08:00',
+        payload: { hourStart: '2026-01-12T07:00:00+00:00', palletsProduced: '3.75', lossReason: 'Material shortage' },
         createdAtIso: '2026-01-12T08:00:00.000Z',
       }),
     )
     vi.mocked(hmiApi.submitHourlyUpdate).mockResolvedValue(hourlyResponse())
 
-    await renderActiveRun()
+    await renderActiveRun(runState({ hours: HOURS_ONE_DUE }))
 
     expect(
-      screen.getByText(/an hourly update of 3.75 pallets was not confirmed/i),
+      screen.getByText(/3.75 pallets for 07:00–08:00 was not confirmed/i),
     ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /check and retry/i }))
-    fireEvent.change(screen.getByLabelText(/pallets produced this period/i), {
-      target: { value: '3.75' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: /confirm update/i }))
-
     await waitFor(() => expect(hmiApi.submitHourlyUpdate).toHaveBeenCalled())
-    expect(vi.mocked(hmiApi.submitHourlyUpdate).mock.calls[0][2]).toBe('k-pending-0000000000000001')
+    expect(hmiApi.submitHourlyUpdate).toHaveBeenCalledWith(99, {
+      line_technician: 'Liam', hour_start: '2026-01-12T07:00:00+00:00', pallets_produced: '3.75', other_loss_reason: 'Material shortage',
+    }, 'k-pending-0000000000000001')
   })
 
   it('a conflict from the server is shown as a safe message', async () => {
@@ -464,7 +499,7 @@ describe('Hourly Update', () => {
     const input = await openHourlyUpdate()
 
     fireEvent.change(input, { target: { value: '2' } })
-    fireEvent.click(screen.getByRole('button', { name: /confirm update/i }))
+    fireEvent.click(screen.getByRole('button', { name: /save 07:00–08:00/i }))
 
     await waitFor(() =>
       expect(screen.getByText(/already used with different details/i)).toBeInTheDocument(),
@@ -574,7 +609,7 @@ describe('Planned Downtime', () => {
     fireEvent.click(screen.getByRole('button', { name: /end planned downtime/i }))
     fireEvent.click(screen.getByRole('button', { name: /yes, end downtime/i }))
 
-    await waitFor(() => expect(screen.getByText(/nothing was saved/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/may already have saved/i)).toBeInTheDocument())
     expect(
       screen.getByRole('heading', { name: /planned downtime — label change/i }),
     ).toBeInTheDocument()
@@ -585,7 +620,9 @@ describe('Planned Downtime', () => {
     fireEvent.click(screen.getByRole('button', { name: /planned downtime/i }))
 
     expect(screen.queryByRole('button', { name: /^Changeover$/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /start changeover/i })).toBeInTheDocument()
+    // A product change is End Run -> Changeover, never an in-run stop.
+    expect(screen.queryByRole('button', { name: /start changeover/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/use end run, then choose changeover/i)).toBeInTheDocument()
   })
 })
 

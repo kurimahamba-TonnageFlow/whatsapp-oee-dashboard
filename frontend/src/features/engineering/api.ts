@@ -37,11 +37,11 @@ export function getFaults(token: string, signal?: AbortSignal) {
 }
 
 /** POST /api/v1/engineering/faults/{id}/accept - no request body. */
-export function acceptFault(token: string, downtimeEventId: number, signal?: AbortSignal) {
+export function acceptFault(token: string, downtimeEventId: number, signal?: AbortSignal, idempotencyKey?: string) {
   return apiClient.post<EngineeringAcceptResponse>(
     `/api/v1/engineering/faults/${downtimeEventId}/accept`,
     undefined,
-    { token, signal },
+    { token, signal, idempotencyKey },
   )
 }
 
@@ -51,11 +51,12 @@ export function addRepairUpdate(
   downtimeEventId: number,
   payload: RepairUpdatePayload,
   signal?: AbortSignal,
+  idempotencyKey?: string,
 ) {
   return apiClient.post<EngineeringUpdateResponse>(
     `/api/v1/engineering/faults/${downtimeEventId}/updates`,
     payload,
-    { token, signal },
+    { token, signal, idempotencyKey },
   )
 }
 
@@ -66,11 +67,12 @@ export function closeFault(
   downtimeEventId: number,
   payload: CloseFaultPayload,
   signal?: AbortSignal,
+  idempotencyKey?: string,
 ) {
   return apiClient.post<EngineeringCloseResponse>(
     `/api/v1/engineering/faults/${downtimeEventId}/close`,
     payload,
-    { token, signal },
+    { token, signal, idempotencyKey },
   )
 }
 
@@ -80,10 +82,11 @@ export function handOverFault(
   downtimeEventId: number,
   payload: HandoverPayload,
   signal?: AbortSignal,
+  idempotencyKey?: string,
 ) {
   return apiClient.post<EngineeringHandoverResponse>(
     `/api/v1/engineering/faults/${downtimeEventId}/handover`,
     payload,
-    { token, signal },
+    { token, signal, idempotencyKey },
   )
 }

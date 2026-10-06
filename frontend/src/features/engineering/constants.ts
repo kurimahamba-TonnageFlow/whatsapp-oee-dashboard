@@ -71,7 +71,6 @@ export function canHandOverFault(
 ): boolean {
   return (
     fault.engineer === currentEngineer &&
-    fault.production_status === 'Ongoing' &&
     fault.engineering_status === 'Ongoing' &&
     fault.accepted_at !== null
   )

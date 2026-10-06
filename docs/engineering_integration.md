@@ -268,3 +268,21 @@ altered, backfilled or renamed.
 migration** - the same preflight confirmed the constraint already
 permits `Investigation`, `Follow Up` and `Resolution`, which is
 everything this API needs.
+
+
+## Engineering review changes (2026-10-04)
+
+GET faults now includes nullable report_note, displayed as Technician report. Engineering closure does not restore production. A repair-update ownership race returns 409 without an insert.
+
+Casepacker actions now also accept handover with a required note, authenticated owner only. This clears engineer/accepted_at, preserves ready_at as null and records history in the same idempotent transaction. Another engineer may then accept; the production start gate remains closed until ready. Apply migrations/20261004092500_casepacker_handover.sql after the original readiness migration and before this backend. No live migration has been applied.
+
+See docs/mvp_snagging.md for verified tests and outstanding response-loss recovery issues; this review is not deployment sign-off.
+
+
+## Durable writes and recovery (2026-10-04)
+
+The React app now includes Idempotency-Key for fault accept, updates, close and handover as well as casepacker actions. Keyed fault requests use database.act_on_engineering_fault: claim/replay first, SELECT FOR UPDATE, authenticated ownership/status validation, history/state mutation and replay-response storage within one transaction. The action fingerprint includes the job, authenticated engineer, action and validated request payload. Existing clients without a key continue on the legacy path; they must adopt a stable key per action for duplicate-safe retries.
+
+Engineering pending actions and drafts are stored locally under pulse.engineering.pending.v1.<engineer> and pulse.engineering.draft.v1.<scope>:<engineer>:<job>:<form>. Tokens remain memory-only. Recovery is independent of the visible job list, replays the original saved body/key and refreshes authoritative state after success. Submitted work requires available browser storage; unsent drafts are best-effort. Another engineer's session does not display the previous engineer's pending work. Clearing browser data removes local drafts/recovery; it does not undo server writes. Retry is refused after 89 days because server keys expire after 90 days.
+
+No schema migration is added for this recovery pass: it uses the existing idempotency table. Casepacker handover still requires the migration documented above. See mvp_snagging.md for local evidence and the outstanding physical tablet pilot.

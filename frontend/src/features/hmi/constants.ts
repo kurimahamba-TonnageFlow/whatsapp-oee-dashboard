@@ -1,3 +1,4 @@
+import catalogue from '../../../../src/production_catalogue.json'
 /**
  * Static reference data for the Start Run form. Matches the backend's
  * own confirmed configuration exactly:
@@ -8,8 +9,7 @@
  *   - SHIFTS: docs/hmi_integration.md / this stage's instructions
  * PRODUCTS and CUSTOMERS are not backend-validated (production_line and
  * line_technician are the only fields the API restricts to a known
- * list - see docs/hmi_integration.md), so these are the frontend's own
- * reference lists.
+ * list - see docs/hmi_integration.md), the displayed choices come from the shared production catalogue.
  */
 
 /** How often Home re-reads the authoritative line state. 20s is short
@@ -42,37 +42,12 @@ export interface ShiftDefinition {
   endHour: number
 }
 
-export const SHIFTS: ShiftDefinition[] = [
-  { name: 'Days', label: 'Days (06:00–14:00)', startHour: 6, endHour: 14 },
-  { name: 'Afternoons', label: 'Afternoons (14:00–22:00)', startHour: 14, endHour: 22 },
-  { name: 'Nights', label: 'Nights (22:00–06:00)', startHour: 22, endHour: 6 },
-]
+export const SHIFTS = catalogue.shifts as ShiftDefinition[]
 
-export const PRODUCTS = [
-  'White Basmati',
-  'Brown Basmati',
-  'White Long Grain',
-  'Brown Long Grain',
-  'Arborio',
-  'Pudding',
-  'Risotto',
-  'White LG Easy Cook',
-  'Brown LG Easy Cook',
-  'Jasmine',
-  'Thai Sticky',
-  'Thai Pathum Thani',
-  'Sushi',
-  'Thai Hom Mali',
-] as const
+export const PRODUCTS = catalogue.products
 
-/**
- * Confirmed customers: Asda and Tesco appear in this project's own
- * README worked examples; Morissons was observed in live production
- * data during the Stage 2 migration verification (spelling preserved
- * exactly as seen live, not "corrected"). Waitrose added per explicit
- * instruction.
- */
-export const CUSTOMERS = ['Asda', 'Tesco', 'Morissons', 'Waitrose'] as const
+/** Current catalogue; historical aliases are preserved by backend filters. */
+export const CUSTOMERS = catalogue.customers
 
 /** Initial planned-downtime buttons, used until/unless
  * GET /api/v1/hmi/config supplies configured planned_downtime buttons

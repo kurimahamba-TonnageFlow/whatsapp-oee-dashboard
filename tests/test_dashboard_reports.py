@@ -39,7 +39,7 @@ def run(run_id, line, speed, ppc, cpp, weight="1.000", status="Active"):
         "id": run_id, "production_line": line, "line_technician": "Liam", "shift": "Day",
         "customer": "Asda", "product": "Basmati", "format": "Pillow",
         "pack_weight_kg": Decimal(weight), "packs_per_case": ppc, "cases_per_pallet": cpp,
-        "target_speed_ppm": Decimal(speed), "status": status, "started_at": utc(2026, 1, 12, 6),
+        "standard_speed_ppm": Decimal(speed), "target_speed_ppm": Decimal(speed), "status": status, "started_at": utc(2026, 1, 12, 6),
         "finished_at": None, "pallets_remaining": Decimal("13.21"), "total_pallets_completed": Decimal("10.79"),
     }
 
@@ -272,7 +272,8 @@ def test_overview_site_output_and_line_attention():
     assert lines["Rovema"]["output"]["output_gap_packs"] == 433.0
     assert lines["Rovema"]["output"]["production_achievement_percent"] == 71.4
 
-    assert lines["GIC"]["attention_status"] == "green"
+    assert lines["GIC"]["attention_status"] == "amber"
+    assert "incomplete" in lines["GIC"]["attention_explanation"]
     assert lines["GIC"]["output"]["production_achievement_percent"] == 97.8
 
     assert lines["Guill"]["attention_status"] == "grey"
@@ -302,16 +303,16 @@ def test_overview_gap_attribution_is_estimated_capped_and_complete():
     assert attribution["planned_downtime"]["minutes"] == 10.0
     assert attribution["planned_downtime"]["estimated_lost_packs"] == 84.0
     assert attribution["unplanned_downtime"]["minutes"] == 10.0
-    assert attribution["unplanned_downtime"]["estimated_lost_tonnes"] == 0.084
+    assert attribution["unplanned_downtime"]["estimated_lost_tonnes"] == 0.045
     # Rovema: remainder 433 - 168 = 265 is fully explained by the 304-pack
     # shortfall in the hour with a recorded reason. GIC: 7200 - 7040 =
     # 160 packs short with no downtime and no reason -> unexplained.
-    assert attribution["other_or_speed_loss"]["estimated_lost_packs"] == 265.0
-    assert attribution["unexplained_gap"]["estimated_lost_packs"] == 160.0
+    assert attribution["other_or_speed_loss"]["estimated_lost_packs"] == 0.0
+    assert attribution["unexplained_gap"]["estimated_lost_packs"] == 464.0
     assert attribution["measured_output_gap"]["estimated_lost_packs"] == 593.0
     assert attribution["by_machine"] == [
         {"production_line": "Rovema", "machine": "BV1", "minutes": 10.0,
-         "estimated_lost_packs": 84.0, "estimated_lost_pallets": 0.84, "estimated_lost_tonnes": 0.084},
+         "estimated_lost_packs": 45.0, "estimated_lost_pallets": 0.45, "estimated_lost_tonnes": 0.045},
     ]
 
 
@@ -360,7 +361,7 @@ def test_machine_summary_ranks_by_estimated_tonnes_and_keeps_oee_line_level():
     machines = report["machines"]
 
     assert [m["machine"] for m in machines] == ["BV1", "Casepacker"]
-    assert machines[0]["estimated_lost_tonnes"] == 0.084
+    assert machines[0]["estimated_lost_tonnes"] == 0.045
     assert machines[0]["maintenance_preventable"]["Yes"] == 1
     assert machines[1]["open_faults"] == 1
     assert machines[1]["downtime_minutes_in_window"] == 20.0
@@ -516,7 +517,7 @@ def dashboard_get_paths():
 
 
 def test_every_dashboard_route_is_covered():
-    assert len(dashboard_get_paths()) == 18
+    assert len(dashboard_get_paths()) == 20
 
 
 @pytest.mark.parametrize("path", dashboard_get_paths())
@@ -578,7 +579,7 @@ def test_overview_defaults_to_current_shift(manager_client, fixed_data):
     # Shift windows select hourly output by operational shift instance.
     assert fixed_data == [(SHIFT.start, SHIFT.end, None, True)]
     assert {line["production_line"]: line["attention_status"] for line in body["lines"]} == {
-        "Rovema": "red", "GIC": "green", "Guill": "grey",
+        "Rovema": "red", "GIC": "amber", "Guill": "grey",
     }
 
 
@@ -678,3 +679,124 @@ def test_changeovers_endpoint_converts_factory_days_and_groups(manager_client, m
     assert received["production_line"] == "GIC"
     assert received["min_duration_minutes"] == 10
     assert response.json()["groups"][0]["key"] == "Liam"
+
+
+def line_stop(stop_id, kind, start, end, reason=None, physical_end=None):
+    return {
+        "id": stop_id, "production_line": "Rovema", "kind": kind, "reason": reason,
+        "started_at": start, "ended_at": end, "physical_ended_at": physical_end,
+        "reference_speed_ppm": Decimal(100), "reference_pack_weight_kg": Decimal("1.000"),
+    }
+
+
+def test_overview_lists_other_and_restart_delay_as_separate_line_stop_reasons():
+    data = window_data()
+    data["line_stops"] = [
+        line_stop(1, "other", utc(2026, 1, 12, 7, 0), utc(2026, 1, 12, 7, 40), reason="Power cut"),
+        line_stop(2, "restart_delay", utc(2026, 1, 12, 7, 40), utc(2026, 1, 12, 8, 0), reason="Power cut"),
+        # Started in the previous shift: only the part inside this one counts.
+        line_stop(3, "handover", utc(2026, 1, 12, 5, 50), utc(2026, 1, 12, 6, 10)),
+    ]
+
+    stops = dashboard_reports.build_overview(data, SHIFT, NOW)["line_stops"]
+
+    rows = {row["reason"]: row for row in stops["by_reason"]}
+    assert rows["Other: Power cut"]["downtime_type"] == "unplanned" and rows["Other: Power cut"]["minutes"] == 40.0
+    assert rows["Restart delay"]["downtime_type"] == "unplanned" and rows["Restart delay"]["minutes"] == 20.0
+    assert rows["Shift handover"]["minutes"] == 10.0
+    # 20 min x 100 packs/min x 1 kg = 2 t.
+    assert rows["Restart delay"]["estimated_lost_tonnes"] == 2.0
+    assert stops["unplanned_minutes"] == 60.0 and stops["planned_minutes"] == 10.0
+
+
+def test_line_stops_do_not_change_the_run_based_downtime_figures():
+    data = window_data()
+    before = dashboard_reports.build_overview(data, SHIFT, NOW)["gap_attribution"]
+    data["line_stops"] = [
+        line_stop(2, "restart_delay", utc(2026, 1, 12, 7, 40), utc(2026, 1, 12, 8, 0), reason="Power cut"),
+    ]
+    after = dashboard_reports.build_overview(data, SHIFT, NOW)["gap_attribution"]
+    assert before == after
+
+
+def test_an_open_restart_delay_is_counted_up_to_now_only():
+    data = window_data()
+    data["line_stops"] = [line_stop(2, "restart_delay", utc(2026, 1, 12, 9, 0), None, reason="Power cut")]
+    stops = dashboard_reports.build_overview(data, SHIFT, NOW)["line_stops"]
+    assert stops["by_reason"][0]["minutes"] == 30.0
+
+
+def test_not_scheduled_is_its_own_type_with_no_loss_and_no_downtime():
+    data = window_data()
+    data["line_stops"] = [
+        line_stop(1, "not_scheduled", utc(2026, 1, 12, 6, 0), utc(2026, 1, 12, 8, 0)),
+        line_stop(2, "other", utc(2026, 1, 12, 8, 0), utc(2026, 1, 12, 8, 30), reason="Power cut"),
+    ]
+
+    stops = dashboard_reports.build_overview(data, SHIFT, NOW)["line_stops"]
+
+    rows = {row["reason"]: row for row in stops["by_reason"]}
+    assert rows["Not scheduled"]["downtime_type"] == "not_scheduled"
+    assert rows["Not scheduled"]["minutes"] == 120.0
+    assert rows["Not scheduled"]["estimated_lost_tonnes"] is None       # nothing was scheduled to be made
+    assert stops["not_scheduled_minutes"] == 120.0
+    assert stops["unplanned_minutes"] == 30.0 and stops["planned_minutes"] == 0.0
+
+
+def log_stop(stop_id, kind, follows=None, has_follower=False, reason=None, ended=None):
+    return {
+        "id": stop_id, "production_line": "Rovema", "kind": kind, "reason": reason,
+        "previous_production_run_id": 5, "next_production_run_id": None, "follows_stoppage_id": follows,
+        "started_by": "Liam", "started_at": utc(2026, 1, 12, 7, 0), "physical_ended_by": None,
+        "physical_ended_at": None, "ended_by": None, "ended_at": ended, "duration_minutes": None,
+        "has_follower": has_follower,
+    }
+
+
+def test_the_line_stop_log_offers_only_the_corrections_the_database_accepts():
+    data = {
+        "stops": [
+            log_stop(1, "other", reason="No orders"),
+            log_stop(2, "other", reason="Power cut", has_follower=True, ended=utc(2026, 1, 12, 8, 0)),
+            log_stop(3, "restart_delay", follows=2, reason="Power cut"),
+            log_stop(4, "changeover"),
+        ],
+        "reclassifications": [
+            {"id": 9, "line_stoppage_id": 1, "previous_kind": "handover", "previous_reason": None,
+             "new_kind": "other", "new_reason": "No orders", "changed_by": "Priya",
+             "changed_at": utc(2026, 1, 12, 9, 0), "note": "Not a handover"},
+        ],
+    }
+
+    log = {row["stoppage_id"]: row for row in dashboard_reports.build_line_stop_log(data, NOW)["stops"]}
+
+    assert log[1]["allowed_reclassifications"] == ["handover", "other", "not_scheduled"]
+    assert log[2]["allowed_reclassifications"] == ["other"]
+    assert log[3]["allowed_reclassifications"] == ["restart_delay", "not_scheduled", "other"]
+    assert log[4]["allowed_reclassifications"] == []
+    assert log[1]["reclassifications"][0]["previous_kind"] == "handover"
+    assert log[1]["reclassifications"][0]["changed_by"] == "Priya"
+    assert log[1]["is_open"] and log[1]["minutes"] == 150.0          # 07:00 -> NOW 09:30
+    assert log[3]["downtime_type"] == "unplanned"
+
+
+def test_unknown_standard_preserves_reported_output_without_green_status():
+    data = window_data()
+    data["runs"][1]["standard_speed_ppm"] = None
+    report = dashboard_reports.build_overview(data, SHIFT, NOW)
+    line = next(row for row in report["lines"] if row["production_line"] == "GIC")
+    assert line["output"]["hourly_update_count"] == 0
+    assert line["reported_palletised_output"]["actual_tonnes"] > 0
+    assert line["attention_status"] == "amber"
+
+
+def test_complete_good_output_can_still_be_green():
+    data = window_data()
+    data["hourly"].extend([
+        hourly(25, 2, 7, 7200, "4.1"),
+        hourly(26, 2, 8, 7200, "4.1"),
+    ])
+    report = dashboard_reports.build_overview(data, SHIFT, NOW)
+    line = next(row for row in report["lines"] if row["production_line"] == "GIC")
+    assert line["reconciliation"]["coverage_complete"] is True
+    assert line["attention_status"] == "green"

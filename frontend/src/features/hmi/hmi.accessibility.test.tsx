@@ -20,6 +20,7 @@ afterEach(() => {
 })
 
 const cssSource = readFileSync(path.resolve(__dirname, 'hmi.css'), 'utf-8')
+const tokensSource = readFileSync(path.resolve(__dirname, '../../styles/tokens.css'), 'utf-8')
 
 describe('HMI accessibility and responsive foundations', () => {
   it('defines a visible keyboard focus style (not hover-only)', () => {
@@ -33,8 +34,12 @@ describe('HMI accessibility and responsive foundations', () => {
   })
 
   it('gives every button a minimum 44px touch target', () => {
-    expect(cssSource).toMatch(/\.hmi-screen button\s*{[^}]*min-height: 56px/)
-    expect(cssSource).toMatch(/\.hmi-screen button\s*{[^}]*min-width: 44px/)
+    // The sizes come from the shared design tokens: the HMI must use them,
+    // and the tokens must still be 56px (HMI actions) and 44px (minimum).
+    expect(cssSource).toMatch(/\.hmi-screen button\s*{[^}]*min-height: var\(--pulse-touch-target-hmi\)/)
+    expect(cssSource).toMatch(/\.hmi-screen button\s*{[^}]*min-width: var\(--pulse-touch-target-min\)/)
+    expect(tokensSource).toMatch(/--pulse-touch-target-hmi: 56px/)
+    expect(tokensSource).toMatch(/--pulse-touch-target-min: 44px/)
   })
 
   it('a rendered HMI button is a real, keyboard-focusable element', async () => {

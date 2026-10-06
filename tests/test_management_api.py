@@ -8,6 +8,8 @@ imported is monkeypatched at the point where they imported it.
 """
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+import json
 import inspect
 from pathlib import Path
 import sys
@@ -75,6 +77,28 @@ def test_login_with_incorrect_pin_returns_401():
     assert response.status_code == 401
 
 
+def test_login_with_a_non_ascii_pin_is_a_normal_wrong_pin_not_a_crash():
+    # Regression: hmac.compare_digest raises TypeError on non-ASCII str,
+    # which surfaced as a 500 (e.g. an accented key on a tablet keyboard).
+    response = client.post(
+        "/api/v1/management/login",
+        json={"pin": "éééé", "manager_name": "Kuri"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_a_configured_non_ascii_pin_still_signs_in(monkeypatch):
+    monkeypatch.setattr(management_auth, "MANAGEMENT_PIN", "café-42")
+
+    response = client.post(
+        "/api/v1/management/login",
+        json={"pin": "café-42", "manager_name": "Kuri"},
+    )
+
+    assert response.status_code == 200
+
+
 def test_login_returns_503_when_pin_not_configured(monkeypatch):
     monkeypatch.setattr(management_auth, "MANAGEMENT_PIN", None)
 
@@ -116,6 +140,38 @@ def test_logout_revokes_session():
     assert protected_response.status_code == 401
 
 
+def test_session_check_returns_the_login_expiry_without_extending_it():
+    login = client.post(
+        "/api/v1/management/login", json={"pin": TEST_PIN, "manager_name": "Kuri"}
+    ).json()
+
+    response = client.get("/api/v1/management/session", headers=_auth_headers(login["token"]))
+
+    assert response.status_code == 200
+    assert response.json()["manager_name"] == "Kuri"
+    assert response.json()["expires_at"] == login["expires_at"]
+    assert "token" not in response.json()
+
+
+def test_session_check_rejects_a_revoked_token():
+    token = _login()
+    client.post("/api/v1/management/logout", headers=_auth_headers(token))
+
+    response = client.get("/api/v1/management/session", headers=_auth_headers(token))
+
+    assert response.status_code == 401
+
+
+def test_session_check_rejects_a_token_lost_in_a_server_restart():
+    token = _login()
+    # A restart empties the in-memory session store.
+    management_auth._sessions.clear()
+
+    response = client.get("/api/v1/management/session", headers=_auth_headers(token))
+
+    assert response.status_code == 401
+
+
 # ==========================================================
 # UNAUTHORISED ACCESS
 # ==========================================================
@@ -125,6 +181,7 @@ PROTECTED_ROUTES = [
     ("GET", "/api/v1/management/lines"),
     ("GET", "/api/v1/management/active-runs"),
     ("GET", "/api/v1/management/technician-performance"),
+    ("GET", "/api/v1/management/session"),
 ]
 
 
@@ -171,11 +228,12 @@ def test_list_lines_returns_items(monkeypatch):
     assert response.json()["items"][0]["name"] == "Rovema"
 
 
-def test_create_line_writes_audit_log(monkeypatch):
+def test_create_line_passes_actor_to_atomic_write(monkeypatch):
+    transactions=[]
     token = _login()
     created_row = {"id": 5, "name": "NewLine", "active": True, "display_order": 0}
     monkeypatch.setattr(
-        management_api, "create_production_line", lambda name, display_order: created_row
+        management_api, "create_production_line", lambda name, display_order, **kwargs: (transactions.append(kwargs) or created_row)
     )
 
     audit_calls = []
@@ -191,12 +249,8 @@ def test_create_line_writes_audit_log(monkeypatch):
 
     assert response.status_code == 201
     assert response.json()["name"] == "NewLine"
-    assert len(audit_calls) == 1
-    assert audit_calls[0]["action"] == "create_line"
-    assert audit_calls[0]["manager_name"] == "Kuri"
-    assert audit_calls[0]["record_type"] == "production_line"
-    assert audit_calls[0]["previous_value"] is None
-    assert audit_calls[0]["new_value"]["name"] == "NewLine"
+    assert audit_calls == []
+    assert transactions == [{"audit_actor":"Kuri"}]
 
 
 def test_create_line_rejects_blank_name():
@@ -233,7 +287,7 @@ def test_patch_line_success_writes_before_and_after(monkeypatch):
     monkeypatch.setattr(
         management_api,
         "update_production_line",
-        lambda line_id, name, active, display_order: after,
+        lambda line_id, name, active, display_order, **kwargs: after,
     )
 
     audit_calls = []
@@ -249,8 +303,7 @@ def test_patch_line_success_writes_before_and_after(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["active"] is False
-    assert audit_calls[0]["previous_value"]["active"] is True
-    assert audit_calls[0]["new_value"]["active"] is False
+    assert audit_calls == []  # Locked snapshots are recorded by the database transaction.
 
 
 # ==========================================================
@@ -268,7 +321,7 @@ def test_create_machine(monkeypatch):
         "display_order": 0,
     }
     monkeypatch.setattr(
-        management_api, "create_machine", lambda line_id, name, display_order: created
+        management_api, "create_machine", lambda line_id, name, display_order, **kwargs: created
     )
     monkeypatch.setattr(management_api, "insert_audit_log", lambda **kwargs: None)
 
@@ -315,7 +368,7 @@ def test_create_fault_button(monkeypatch):
     monkeypatch.setattr(
         management_api,
         "create_button",
-        lambda machine_id, name, event_type, ownership, fault_category, display_order: created,
+        lambda machine_id, name, event_type, ownership, fault_category, display_order, **kwargs: created,
     )
     monkeypatch.setattr(management_api, "insert_audit_log", lambda **kwargs: None)
 
@@ -344,7 +397,7 @@ def test_create_planned_downtime_button(monkeypatch):
     monkeypatch.setattr(
         management_api,
         "create_button",
-        lambda machine_id, name, event_type, ownership, fault_category, display_order: created,
+        lambda machine_id, name, event_type, ownership, fault_category, display_order, **kwargs: created,
     )
     monkeypatch.setattr(management_api, "insert_audit_log", lambda **kwargs: None)
 
@@ -411,7 +464,7 @@ def test_patch_button_can_disable(monkeypatch):
     monkeypatch.setattr(
         management_api,
         "update_button",
-        lambda button_id, name, event_type, ownership, fault_category, display_order, active: after,
+        lambda button_id, name, event_type, ownership, fault_category, display_order, active, **kwargs: after,
     )
     monkeypatch.setattr(management_api, "insert_audit_log", lambda **kwargs: None)
 
@@ -586,14 +639,15 @@ def test_force_close_rejects_unknown_reason():
     assert response.status_code == 422
 
 
-def test_force_close_success_writes_audit_log(monkeypatch):
+def test_force_close_success_passes_audit_to_transaction(monkeypatch):
+    transaction_calls = []
     token = _login()
     before = {"id": 24, "production_line": "GIC", "status": "Active"}
     closed = {"id": 24, "production_line": "GIC", "status": "Cancelled", "finished_at": "now"}
 
     monkeypatch.setattr(management_api, "get_production_run_by_id", lambda run_id: before)
     monkeypatch.setattr(
-        management_api, "force_close_production_run", lambda run_id, finished_at: closed
+        management_api, "force_close_production_run", lambda run_id, finished_at, closed_by, **kwargs: (transaction_calls.append(kwargs) or closed)
     )
 
     audit_calls = []
@@ -613,11 +667,8 @@ def test_force_close_success_writes_audit_log(monkeypatch):
     assert body["run_status"] == "Cancelled"
     assert body["closed_by"] == "Kuri"
 
-    assert len(audit_calls) == 1
-    assert audit_calls[0]["action"] == "force_close_run"
-    assert audit_calls[0]["manager_name"] == "Kuri"
-    assert audit_calls[0]["record_type"] == "production_run"
-    assert audit_calls[0]["reason"] == "Technician left mid-shift"
+    assert audit_calls == []  # No separate, fallible post-commit audit write.
+    assert transaction_calls == [{"manager_name":"Kuri","reason":"Technician left mid-shift"}]
 
 
 def test_force_close_concurrent_protection_returns_409(monkeypatch):
@@ -631,7 +682,7 @@ def test_force_close_concurrent_protection_returns_409(monkeypatch):
         lambda run_id: {"id": run_id, "production_line": "GIC", "status": "Active"},
     )
     monkeypatch.setattr(
-        management_api, "force_close_production_run", lambda run_id, finished_at: None
+        management_api, "force_close_production_run", lambda run_id, finished_at, closed_by, **kwargs: None
     )
 
     response = client.post(
@@ -643,6 +694,66 @@ def test_force_close_concurrent_protection_returns_409(monkeypatch):
     assert response.status_code == 409
 
 
+def test_force_close_refusal_from_the_database_is_a_409_with_its_message(monkeypatch):
+    token = _login()
+    monkeypatch.setattr(
+        management_api,
+        "get_production_run_by_id",
+        lambda run_id: {"id": run_id, "production_line": "GIC", "status": "Active"},
+    )
+
+    def refuse(run_id, finished_at, closed_by, **kwargs):
+        raise database.PulseCaptureError(409, "A changeover is still open on this run.")
+
+    monkeypatch.setattr(management_api, "force_close_production_run", refuse)
+    audit_calls = []
+    monkeypatch.setattr(management_api, "insert_audit_log", lambda **kwargs: audit_calls.append(kwargs))
+
+    response = client.post(
+        "/api/v1/management/runs/24/force-close",
+        json={"reason": "Tablet or browser closed"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A changeover is still open on this run."
+    assert audit_calls == []
+
+
+def test_force_close_reports_the_planned_stop_it_ended_and_records_who_closed(monkeypatch):
+    token = _login()
+    before = {"id": 24, "production_line": "GIC", "status": "Active"}
+    seen = {}
+
+    def close(run_id, finished_at, closed_by, **kwargs):
+        seen["closed_by"] = closed_by
+        seen["finished_at"] = finished_at
+        return {
+            "id": 24, "production_line": "GIC", "status": "Cancelled", "finished_at": finished_at,
+            "ended_planned_stop": {
+                "id": 8, "reason": "Break", "started_at": finished_at, "ended_at": finished_at,
+                "duration_minutes": Decimal("2.6938"),
+            },
+        }
+
+    monkeypatch.setattr(management_api, "get_production_run_by_id", lambda run_id: before)
+    monkeypatch.setattr(management_api, "force_close_production_run", close)
+    audit_calls = []
+    monkeypatch.setattr(management_api, "insert_audit_log", lambda **kwargs: audit_calls.append(kwargs))
+
+    response = client.post(
+        "/api/v1/management/runs/24/force-close",
+        json={"reason": "Technician left mid-shift"},
+        headers=_auth_headers(token),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ended_planned_stop"]["reason"] == "Break"
+    assert seen["closed_by"] == "Kuri (manager force-close)"
+    assert seen["finished_at"].tzinfo is not None
+    assert audit_calls == []  # Database transaction owns the audit snapshot.
+
+
 def test_force_close_returns_safe_error_on_database_failure(monkeypatch, capsys):
     token = _login()
     monkeypatch.setattr(
@@ -651,7 +762,7 @@ def test_force_close_returns_safe_error_on_database_failure(monkeypatch, capsys)
         lambda run_id: {"id": run_id, "production_line": "GIC", "status": "Active"},
     )
 
-    def fake_force_close(run_id, finished_at):
+    def fake_force_close(run_id, finished_at, closed_by, **kwargs):
         raise RuntimeError("postgresql://user:s3cr3t@host/db failed")
 
     monkeypatch.setattr(management_api, "force_close_production_run", fake_force_close)
@@ -677,8 +788,8 @@ def test_force_close_returns_safe_error_on_database_failure(monkeypatch, capsys)
 def test_technician_performance_query_reuses_test_data_exclusion():
     source = inspect.getsource(database.get_technician_performance)
     assert "_run_conditions" in source
-    assert "_hourly_conditions" in source
-    assert "_fault_conditions" in source
+    assert "build_technician_performance" in source
+    assert "origin.production_line" in source
 
 
 def test_technician_performance_ranks_by_target_achievement_not_raw_output(monkeypatch):

@@ -19,7 +19,8 @@ export interface StartRunPayload {
   pack_weight_kg: number
   packs_per_case: number
   pack_type: string
-  target_speed_ppm: number
+  standard_speed_ppm?: number | null
+  target_speed_ppm?: number
   cases_per_pallet: number
   pallets_remaining: number
   previous_run_completed: number
@@ -27,6 +28,8 @@ export interface StartRunPayload {
 }
 
 export interface StartRunResponse {
+  standard_speed_ppm?: number | null
+  standard_version_id?: number | null
   status: string
   message: string
   run_id: number
@@ -51,6 +54,8 @@ export interface RunStateRun {
   pack_weight_kg: number
   packs_per_case: number
   cases_per_pallet: number
+  standard_speed_ppm?: number | null
+  standard_version_id?: number | null
   target_speed_ppm: number
   status: string
   started_at: string
@@ -126,12 +131,141 @@ export interface Changeover {
   note: string | null
 }
 
+// ------------------------------------------------------------
+// Fixed clock hours (GET /api/v1/runs/{id}/hours, and in hmi-state)
+// ------------------------------------------------------------
+
+export type HourStatus = 'reported' | 'due' | 'in_progress'
+
+export interface RunHour {
+  /** UTC instant the clock hour starts - sent back as hour_start. */
+  hour_start: string
+  hour_end: string
+  /** '06:00–07:00' in UK time (with GMT/BST on clock-change days). */
+  hour_label: string
+  status: HourStatus
+  pallets_produced: number | null
+  applicable_minutes: number
+  is_partial_hour: boolean
+}
+
+export interface RunHours {
+  hours: RunHour[]
+  due_count: number
+  next_due_hour: RunHour | null
+  current_hour: RunHour | null
+}
+
+export interface TargetSpeedChange {
+  submitted_at?: string | null
+  supersedes_id?: number | null
+  change_id: number | null
+  previous_speed_ppm: number | null
+  new_speed_ppm: number
+  reason: string | null
+  changed_by: string | null
+  effective_at: string
+}
+
+/** A fault still open on the LINE - possibly from an earlier run. */
+export interface LineFault {
+  downtime_event_id: number
+  production_run_id: number
+  fault_id: number
+  machine: string
+  reason: string
+  reported_by: string
+  engineer: string | null
+  engineering_status: string
+  opened_at: string
+  escalation_count: number
+  last_escalated_at: string | null
+  last_escalated_by: string | null
+  /** Acknowledged since the last run on the line ended. */
+  acknowledged: boolean
+}
+
+export interface OpenLineFaultsResponse {
+  production_line: string
+  handover_at: string | null
+  faults: LineFault[]
+  unacknowledged_count: number
+}
+
 export interface RunState {
   generated_at: string
   run: RunStateRun
   progress: RunStateProgress
   open_planned_downtime: PlannedDowntimeEvent | null
   open_changeover: Changeover | null
+  target_speed_changes?: TargetSpeedChange[]
+  operating_speed_changes?: TargetSpeedChange[]
+  hours?: RunHours
+  line_faults?: LineFault[]
+}
+
+// ------------------------------------------------------------
+// Line stoppages between runs (End Run -> Changeover / Other)
+// ------------------------------------------------------------
+
+export type LineStoppageKind = 'changeover' | 'other' | 'handover' | 'restart_delay' | 'not_scheduled'
+
+export interface OpenLineStoppage {
+  stoppage_id: number
+  kind: LineStoppageKind
+  reason: string | null
+  started_at: string
+  started_by: string | null
+  elapsed_minutes: number | null
+  /** Changeover: End Changeover pressed; the new-run setup is running. */
+  physical_ended_at?: string | null
+}
+
+export interface LineStoppageResponse {
+  status: string
+  stoppage_id: number
+  production_line: string
+  kind: LineStoppageKind
+  /** Not scheduled is neither: it is in no target and no downtime. */
+  downtime_type: 'planned' | 'unplanned' | 'not_scheduled'
+  reason: string | null
+  started_by: string
+  started_at: string
+  ended_by: string | null
+  ended_at: string | null
+  duration_minutes: number | null
+  physical_ended_at?: string | null
+  physical_ended_by?: string | null
+  physical_minutes?: number | null
+  setup_minutes?: number | null
+  total_minutes?: number | null
+  is_active: boolean
+  /** Resolve on an Other stop: the Restart delay it started. */
+  restart_delay?: LineStoppageResponse | null
+}
+
+export interface LineStoppageStartPayload {
+  casepacker_required?: boolean
+  casepacker_details?: string | null
+  /** A Restart delay is only ever started by Resolve, never by hand. */
+  kind: Exclude<LineStoppageKind, 'restart_delay'>
+  started_by: string
+  reason?: string | null
+}
+
+export interface TargetSpeedPayload {
+  line_technician: string
+  /** Decimal string. */
+  new_operating_speed_ppm: string
+  effective_at?: string
+  supersedes_id?: number
+  reason: string
+}
+
+export interface FaultAcknowledgePayload {
+  production_line: string
+  acknowledged_by: string
+  note?: string | null
 }
 
 // ------------------------------------------------------------
@@ -163,6 +297,12 @@ export interface HmiLineState {
   stale_status: StaleStatus
   stale_reason: string | null
   minutes_since_last_hourly_update: number | null
+  /** Faults still open on the line from ANY run. */
+  line_open_fault_count?: number
+  /** A Changeover / Other / Handover stop running between runs. */
+  open_stoppage?: OpenLineStoppage | null
+  /** A run ended recently and nobody chose End Shift / Changeover / Other. */
+  awaiting_next_step?: { run_id: number; line_technician: string | null; finished_at: string } | null
 }
 
 export interface HmiLineStateResponse {
@@ -177,16 +317,21 @@ export interface HmiLineStateResponse {
 
 export interface HourlyUpdatePayload {
   line_technician: string
+  /** The clock hour this reading is for (its UTC start instant). */
+  hour_start: string
   /** Decimal string, e.g. "3.75". "0" is valid. */
   pallets_produced: string
   other_loss_reason?: string | null
 }
 
 export interface HourlyUpdateResponse {
+  loss_review?: import("./api").HourlyLossReview
   status: string
   hourly_update_id: number
   production_run_id: number
   production_line: string
+  hour_start: string
+  hour_label: string
   shift: string
   period_started_at: string
   period_ended_at: string
@@ -217,6 +362,9 @@ export interface PlannedDowntimeEndPayload {
 export type PlannedDowntimeResponse = PlannedDowntimeEvent & { status: string }
 
 export interface FaultReportPayload {
+  outcome?: 'call_engineer' | 'resolved'
+  started_at?: string
+  restored_at?: string
   reported_by: string
   machine: string
   reason: string
@@ -262,6 +410,7 @@ export interface ChangeoverPairResponse {
 }
 
 export interface CompletionPayload {
+  other_loss_reason?: string
   line_technician: string
   production_since_last_update: boolean
   /** Decimal string when production_since_last_update is true. */
@@ -272,6 +421,7 @@ export interface CompletionPayload {
 }
 
 export interface CompletionPreviewResponse {
+  loss_review?: { remaining_gap_packs: number | null; equivalent_minutes: number | null; prompt_required: boolean; limitations: string[]; operating_context?: import("../shared/OperatingContext").OperatingReport[] }
   production_run_id: number
   production_line: string
   total_pallets_recorded: number
@@ -390,6 +540,7 @@ export const EMPTY_CHANGEOVER_FORM: ChangeoverFormValues = {
  * the operator has to answer it deliberately - a final production
  * figure must never be assumed. */
 export interface CompleteRunFormValues {
+  lossReason?: string
   productionSinceLastUpdate: 'yes' | 'no' | ''
   finalPallets: string
   countUnavailable: boolean

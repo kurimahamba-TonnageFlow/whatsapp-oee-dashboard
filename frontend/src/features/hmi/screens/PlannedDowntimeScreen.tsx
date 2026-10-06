@@ -11,7 +11,8 @@ interface PlannedDowntimeScreenProps {
   errorMessage: string | null
   onStart: (reason: string) => void
   onEnd: () => void
-  onStartChangeover: () => void
+  /** Legacy in-run changeover. Omitted in the End Run -> Changeover flow. */
+  onStartChangeover?: () => void
   onCancel: () => void
 }
 
@@ -112,15 +113,23 @@ export function PlannedDowntimeScreen({
             {reason}
           </button>
         ))}
-        <button
-          type="button"
-          className="hmi-primary-button"
-          onClick={onStartChangeover}
-          disabled={isSubmitting}
-        >
-          Start Changeover
-        </button>
+        {onStartChangeover && (
+          <button
+            type="button"
+            className="hmi-primary-button"
+            onClick={onStartChangeover}
+            disabled={isSubmitting}
+          >
+            Start Changeover
+          </button>
+        )}
       </div>
+      {!onStartChangeover && (
+        <p className="hmi-field-help">
+          Changing product? Use End Run, then choose Changeover - so the old and new product runs stay
+          separate.
+        </p>
+      )}
 
       <div className="hmi-form-actions">
         <button type="button" className="hmi-secondary-button" onClick={onCancel}>

@@ -72,6 +72,7 @@ def test_start_run_success(monkeypatch):
         "production_line": "Rovema",
         "line_technician": "Liam",
         "pallets_remaining": 38,
+        "standard_speed_ppm": None, "standard_version_id": None,
     }
 
 
@@ -412,6 +413,7 @@ def test_complete_run_with_no_final_production(monkeypatch, gic_run):
     assert calls == [(24, {
         "line_technician": "Liam",
         "final_pallets_produced": None,
+        "other_loss_reason": None,
         "count_available": True,
         "xray_pack_count": 9000,
         "unavailable_reason": None,

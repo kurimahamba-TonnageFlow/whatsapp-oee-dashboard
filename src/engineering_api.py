@@ -20,13 +20,17 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 try:
+    from .api_logging import log_operation_failure
     from . import engineering_auth
     from .database import (
         accept_engineering_fault,
+        act_on_engineering_fault,
+        get_casepacker_requests,
+        update_casepacker_request,
         add_engineering_repair_update,
         close_engineering_fault,
         get_downtime_event_by_id,
@@ -35,9 +39,13 @@ try:
     )
     from .domain_constants import ENGINEERS
 except ImportError:
+    from api_logging import log_operation_failure
     import engineering_auth
     from database import (
         accept_engineering_fault,
+        act_on_engineering_fault,
+        get_casepacker_requests,
+        update_casepacker_request,
         add_engineering_repair_update,
         close_engineering_fault,
         get_downtime_event_by_id,
@@ -73,9 +81,8 @@ def _safe_db_call(operation_name, func, *args, **kwargs):
     try:
         return func(*args, **kwargs)
 
-    except Exception:
-        print("DATABASE ERROR")
-        print(f"Engineering operation failed: {operation_name}")
+    except Exception as error:
+        log_operation_failure("engineering", operation_name, error)
 
         raise HTTPException(
             status_code=503,
@@ -189,6 +196,7 @@ class EngineeringFault(BaseModel):
     fault_id: int
     machine: str
     reason: str
+    report_note: str | None = None
     reported_by: str
     engineer: str | None
     production_status: str
@@ -251,12 +259,12 @@ def _get_fault_or_404(downtime_event_id):
 
 def _load_owned_open_fault(downtime_event_id, engineer_name):
     """Shared existence/status/ownership check for /updates and
-    /close: the fault must exist, still be Ongoing, and be accepted by
+    /close: the Engineering job must exist, still be open, and be accepted by
     the calling engineer specifically (not unassigned, not someone
     else's)."""
     fault = _get_fault_or_404(downtime_event_id)
 
-    if fault["production_status"] != "Ongoing":
+    if fault["engineering_status"] == "Resolved":
         raise HTTPException(
             status_code=409,
             detail=f"Fault {downtime_event_id} is already resolved.",
@@ -276,6 +284,10 @@ def _load_owned_open_fault(downtime_event_id, engineer_name):
 # ==========================================================
 
 
+class EmptyEngineeringAction(BaseModel):
+    pass
+
+
 class EngineeringAcceptResponse(BaseModel):
     status: str
     downtime_event_id: int
@@ -288,10 +300,18 @@ class EngineeringAcceptResponse(BaseModel):
 def accept_fault(
     downtime_event_id: int,
     engineer_name: str = Depends(engineering_auth.require_engineering_session),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$"),
 ):
+    if idempotency_key:
+        body = EmptyEngineeringAction()
+        identity = build_idempotency(idempotency_key, f'engineering:{downtime_event_id}:{engineer_name}:accept', body, 200, lambda value: value)
+        return run_idempotent_write('engineering_accept', act_on_engineering_fault,
+                                    downtime_event_id, 'accept', engineer_name, body.model_dump(),
+                                    _server_timestamp(), idempotency=identity)
+
     existing = _get_fault_or_404(downtime_event_id)
 
-    if existing["production_status"] != "Ongoing":
+    if existing["engineering_status"] == "Resolved":
         raise HTTPException(
             status_code=409,
             detail=f"Fault {downtime_event_id} is already resolved.",
@@ -314,7 +334,7 @@ def accept_fault(
             "get_downtime_event_by_id", get_downtime_event_by_id, downtime_event_id
         )
 
-        if current is not None and current["production_status"] != "Ongoing":
+        if current is not None and current["engineering_status"] == "Resolved":
             raise HTTPException(
                 status_code=409,
                 detail=f"Fault {downtime_event_id} is already resolved.",
@@ -422,7 +442,15 @@ def add_update(
     downtime_event_id: int,
     payload: RepairUpdateRequest,
     engineer_name: str = Depends(engineering_auth.require_engineering_session),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$"),
 ):
+    if idempotency_key:
+        body = payload
+        identity = build_idempotency(idempotency_key, f'engineering:{downtime_event_id}:{engineer_name}:update', body, 200, lambda value: value)
+        return run_idempotent_write('engineering_update', act_on_engineering_fault,
+                                    downtime_event_id, 'update', engineer_name, body.model_dump(),
+                                    _server_timestamp(), idempotency=identity)
+
     fault = _load_owned_open_fault(downtime_event_id, engineer_name)
 
     repair_update = {
@@ -446,6 +474,12 @@ def add_update(
         downtime_event_id,
         repair_update,
     )
+
+    if created is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This job has been closed or handed over. Refresh before adding an update.",
+        )
 
     return EngineeringUpdateResponse(
         status="success",
@@ -481,7 +515,15 @@ def close_fault(
     downtime_event_id: int,
     payload: CloseFaultRequest,
     engineer_name: str = Depends(engineering_auth.require_engineering_session),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$"),
 ):
+    if idempotency_key:
+        body = payload
+        identity = build_idempotency(idempotency_key, f'engineering:{downtime_event_id}:{engineer_name}:close', body, 200, lambda value: value)
+        return run_idempotent_write('engineering_close', act_on_engineering_fault,
+                                    downtime_event_id, 'close', engineer_name, body.model_dump(),
+                                    _server_timestamp(), idempotency=identity)
+
     fault = _load_owned_open_fault(downtime_event_id, engineer_name)
 
     repair_update = {
@@ -577,7 +619,15 @@ def handover_fault(
     downtime_event_id: int,
     payload: HandoverRequest,
     engineer_name: str = Depends(engineering_auth.require_engineering_session),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$"),
 ):
+    if idempotency_key:
+        body = payload
+        identity = build_idempotency(idempotency_key, f'engineering:{downtime_event_id}:{engineer_name}:handover', body, 200, lambda value: value)
+        return run_idempotent_write('engineering_handover', act_on_engineering_fault,
+                                    downtime_event_id, 'handover', engineer_name, body.model_dump(),
+                                    _server_timestamp(), idempotency=identity)
+
     fault = _load_owned_open_fault(downtime_event_id, engineer_name)
 
     handover = {
@@ -615,3 +665,36 @@ def handover_fault(
         production_status=released["production_status"],
         accepted_at=released["accepted_at"],
     )
+
+
+# Reuse the same durable idempotency mechanism as tablet writes.
+try:
+    from .api_idempotency import IdempotencyKey, build_idempotency, run_idempotent_write
+except ImportError:
+    from api_idempotency import IdempotencyKey, build_idempotency, run_idempotent_write
+
+
+class CasepackerActionRequest(BaseModel):
+    action: Literal['accept', 'update', 'ready', 'handover']
+    note: str = Field(default='', max_length=2000)
+
+    @model_validator(mode='after')
+    def require_details(self):
+        self.note = self.note.strip()
+        if self.action != 'accept' and not self.note:
+            raise ValueError('Add details of the casepacker work.')
+        return self
+
+
+@router.get('/casepacker-requests')
+def casepacker_requests(engineer: str = Depends(engineering_auth.require_engineering_session)):
+    return {'items': _safe_db_call('get_casepacker_requests', get_casepacker_requests)}
+
+
+@router.post('/casepacker-requests/{request_id}/actions')
+def casepacker_action(request_id: int, payload: CasepackerActionRequest, idempotency_key: IdempotencyKey,
+                      engineer: str = Depends(engineering_auth.require_engineering_session)):
+    identity = build_idempotency(idempotency_key, f'casepacker:{request_id}:{engineer}', payload, 200, lambda x: x)
+    return run_idempotent_write('update_casepacker_request', update_casepacker_request,
+                                request_id, payload.action, engineer, payload.note, _server_timestamp(),
+                                idempotency=identity)

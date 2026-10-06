@@ -3356,6 +3356,7 @@ def display_production_model(
 
 
 def run_session():
+    raise RuntimeError("Legacy terminal capture is retired; use the tablet HMI.")
     welcome()
 
     tracking_finished = False
@@ -3923,5 +3924,5 @@ def run_session():
 
 
 if __name__ == "__main__":
-    run_session()
+    raise SystemExit("Legacy terminal capture is retired. Use the tablet HMI and shared production reconciliation.")
 

@@ -1,0 +1,16 @@
+.hourly-share { min-width:0; display:grid; gap:16px; margin-top:24px; }
+.hourly-share p,.hourly-share h2 { margin:0; }
+.hourly-share__actions { display:flex; flex-wrap:wrap; gap:12px; }
+.hourly-share__download { border:1px solid #71857b; border-radius:8px; padding:12px 18px; min-height:48px; }
+.hourly-share__card { background:#101d1b; color:#d5dedb; border:1px solid #43584d; border-top:5px solid #b7ed65; border-radius:16px; padding:24px; display:grid; gap:14px; overflow-wrap:anywhere; max-width:640px; }
+.hourly-share__brand { color:#b7ed65; font-size:.8rem; letter-spacing:.12em; font-weight:700; }
+.hourly-share__card h3 { color:white; font-size:1.6rem; margin:0; }
+.hourly-share__metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin:8px 0; }
+.hourly-share__metrics dt { color:#b7ed65; font-size:.8rem; }
+.hourly-share__metrics dd { color:white; font-size:1.7rem; font-weight:750; margin:4px 0 0; }
+.hourly-share__notes { border-top:1px solid #43584d; padding-top:16px; }
+.hourly-share__notes h4 { margin:0; color:#b7ed65; }
+.hourly-share__notes p { white-space:pre-wrap; margin-top:10px; }
+.hourly-share__card footer { border-top:1px solid #43584d; padding-top:14px; font-size:.75rem; }
+.hourly-share__image { display:block; width:100%; max-width:540px; height:auto; margin-top:16px; }
+@media(max-width:480px) { .hourly-share__card { padding:18px; } .hourly-share__actions>* { width:100%; justify-content:center; } }

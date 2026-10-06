@@ -1,9 +1,11 @@
+import { useDraft } from './drafts'
 import { useEffect, useState } from 'react'
 import { FieldError } from './FieldError'
 import { MAX_HANDOVER_NOTE_LENGTH } from './constants'
 import { validateHandoverNote } from './validation'
 
 interface HandoverFormProps {
+  draftKey?: string
   isSubmitting: boolean
   /** Called once the note passes validation - this only advances to the
    * confirmation step (see FaultDetailPanel), it never calls the API
@@ -14,15 +16,15 @@ interface HandoverFormProps {
   resetSignal?: number
 }
 
-export function HandoverForm({ isSubmitting, onSubmit, resetSignal }: HandoverFormProps) {
-  const [note, setNote] = useState('')
+export function HandoverForm({ isSubmitting, onSubmit, resetSignal, draftKey }: HandoverFormProps) {
+  const [note, setNote] = useDraft(draftKey, '')
   const [touched, setTouched] = useState(false)
 
   useEffect(() => {
     if (resetSignal === undefined) return
     setNote('')
     setTouched(false)
-  }, [resetSignal])
+  }, [resetSignal, setNote])
 
   const error = touched ? validateHandoverNote(note) : undefined
 

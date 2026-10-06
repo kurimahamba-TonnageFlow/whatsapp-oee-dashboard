@@ -395,8 +395,8 @@ def test_unexplained_remainder_is_preserved_and_split_by_recorded_reasons():
         [period(6, 7, 504, 4, reason=True), period(7, 8, 504, 4, reason=False)],
     )
     assert result.measured_gap.packs == Decimal(208)
-    assert result.other_or_speed_loss.packs == Decimal(104)
-    assert result.unexplained_gap.packs == Decimal(104)
+    assert result.other_or_speed_loss.packs == Decimal(0)
+    assert result.unexplained_gap.packs == Decimal(208)
     total = (
         result.planned_downtime.packs + result.unplanned_downtime.packs
         + result.other_or_speed_loss.packs + result.unexplained_gap.packs

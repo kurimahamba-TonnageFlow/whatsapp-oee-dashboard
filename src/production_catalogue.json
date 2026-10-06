@@ -1,0 +1,75 @@
+{
+  "products": [
+    "White Basmati",
+    "Brown Basmati",
+    "White Long Grain",
+    "Brown Long Grain",
+    "Arborio",
+    "Pudding",
+    "Risotto",
+    "White Long Grain Easy Cook",
+    "Brown Long Grain Easy Cook",
+    "Jasmine",
+    "Thai Sticky",
+    "Thai Pathum Thani",
+    "Sushi",
+    "Thai Hom Mali"
+  ],
+  "customers": [
+    "Aldi",
+    "ASDA",
+    "Morrisons",
+    "Sainsbury",
+    "Waitrose"
+  ],
+  "shifts": [
+    {
+      "name": "Days",
+      "label": "AM 06:00 to 14:00",
+      "startHour": 6,
+      "endHour": 14
+    },
+    {
+      "name": "Afternoons",
+      "label": "PM 14:00 to 22:00",
+      "startHour": 14,
+      "endHour": 22
+    },
+    {
+      "name": "Nights",
+      "label": "Nights 22:00 to 06:00",
+      "startHour": 22,
+      "endHour": 6
+    }
+  ],
+  "aliases": {
+    "product": {
+      "White Bas": "White Basmati",
+      "Brown Bas": "Brown Basmati",
+      "White LG Easy Cook": "White Long Grain Easy Cook",
+      "Brown LG Easy Cook": "Brown Long Grain Easy Cook"
+    },
+    "customer": {
+      "Asda": "ASDA",
+      "Morissons": "Morrisons",
+      "Morisons": "Morrisons",
+      "Sainsburys": "Sainsbury"
+    },
+    "shift": {
+      "Day": "Days",
+      "AM": "Days",
+      "Afternoon": "Afternoons",
+      "PM": "Afternoons",
+      "Night": "Nights"
+    }
+  },
+  "tasks": [
+    "Film change",
+    "Label change",
+    "X-ray (CCP)",
+    "Casepacker",
+    "Robot Palletiser",
+    "Changeover",
+    "Format changeover"
+  ]
+}

@@ -12,17 +12,20 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import os
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator, field_validator
 
 try:
+    from .api_logging import log_operation_failure
     from . import management_auth
     from .database import (
         create_button,
         create_machine,
         create_production_line,
         force_close_production_run,
+        PulseCaptureError,
         get_all_active_runs,
         get_button,
         get_machine,
@@ -42,12 +45,14 @@ try:
     from .factory_time import production_week_start_date, week_window_starting
     from .main import line_technicians_by_line
 except ImportError:
+    from api_logging import log_operation_failure
     import management_auth
     from database import (
         create_button,
         create_machine,
         create_production_line,
         force_close_production_run,
+        PulseCaptureError,
         get_all_active_runs,
         get_button,
         get_machine,
@@ -92,9 +97,13 @@ def _safe_db_call(operation_name, func, *args, **kwargs):
     try:
         return func(*args, **kwargs)
 
-    except Exception:
-        print("DATABASE ERROR")
-        print(f"Management operation failed: {operation_name}")
+    except PulseCaptureError:
+        # A safe, pre-written refusal from the database layer - the
+        # caller turns it into its own HTTP status.
+        raise
+
+    except Exception as error:
+        log_operation_failure("management", operation_name, error)
 
         raise HTTPException(
             status_code=503,
@@ -103,14 +112,26 @@ def _safe_db_call(operation_name, func, *args, **kwargs):
 
 
 def _jsonable(value):
+    """A database row as JSON-safe values for the audit log, including
+    nested rows (a force-close records the planned stop it ended).
+    Decimals are kept exact as strings; json.dumps would otherwise raise
+    and the audit write - which never fails the action - would be lost."""
     if value is None:
         return None
 
-    result = {}
-    for key, val in value.items():
-        result[key] = val.isoformat() if hasattr(val, "isoformat") else val
+    if isinstance(value, dict):
+        return {key: _jsonable(val) for key, val in value.items()}
 
-    return result
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(val) for val in value]
+
+    if isinstance(value, Decimal):
+        return str(value)
+
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+
+    return value
 
 
 def _write_audit(action, manager_name, record_type, record_id, previous_value=None, new_value=None, reason=None):
@@ -125,11 +146,10 @@ def _write_audit(action, manager_name, record_type, record_id, previous_value=No
             reason=reason,
         )
 
-    except Exception:
+    except Exception as error:
         # The primary operation already committed - an audit-log write
         # failure must not undo or fail it, just be reported safely.
-        print("DATABASE ERROR")
-        print(f"Could not write audit log for action: {action}")
+        log_operation_failure("management", f"audit_log:{action}", error)
 
 
 # ==========================================================
@@ -184,6 +204,27 @@ def login(payload: LoginRequest, request: Request):
     }
 
 
+@router.get("/session")
+def current_session(token: str = Depends(management_auth.get_bearer_token)):
+    """Confirms a token the browser kept across a page refresh is still
+    live on this server. It never extends the session: expires_at is
+    the one set at login. A token from before a server restart is
+    unknown here and gets the usual 401."""
+    session = management_auth.get_session(token)
+
+    if session is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Management session is invalid or has expired.",
+        )
+
+    return {
+        "status": "success",
+        "manager_name": session["manager_name"],
+        "expires_at": session["expires_at"],
+    }
+
+
 @router.post("/logout")
 def logout(token: str = Depends(management_auth.get_bearer_token)):
     management_auth.revoke_session(token)
@@ -232,9 +273,9 @@ def create_line(
         create_production_line,
         payload.name,
         payload.display_order,
+        audit_actor=manager_name,
     )
 
-    _write_audit("create_line", manager_name, "production_line", created["id"], None, created)
 
     return created
 
@@ -257,9 +298,9 @@ def patch_line(
         payload.name,
         payload.active,
         payload.display_order,
+        audit_actor=manager_name,
     )
 
-    _write_audit("update_line", manager_name, "production_line", line_id, before, updated)
 
     return updated
 
@@ -305,10 +346,10 @@ def create_line_machine(
     manager_name: str = Depends(management_auth.require_management_session),
 ):
     created = _safe_db_call(
-        "create_machine", create_machine, line_id, payload.name, payload.display_order
+        "create_machine", create_machine, line_id, payload.name, payload.display_order,
+        audit_actor=manager_name,
     )
 
-    _write_audit("create_machine", manager_name, "machine", created["id"], None, created)
 
     return created
 
@@ -331,9 +372,9 @@ def patch_machine(
         payload.name,
         payload.active,
         payload.display_order,
+        audit_actor=manager_name,
     )
 
-    _write_audit("update_machine", manager_name, "machine", machine_id, before, updated)
 
     return updated
 
@@ -409,9 +450,9 @@ def create_machine_button(
         payload.ownership,
         payload.fault_category,
         payload.display_order,
+        audit_actor=manager_name,
     )
 
-    _write_audit("create_button", manager_name, "button", created["id"], None, created)
 
     return created
 
@@ -437,9 +478,9 @@ def patch_button(
         payload.fault_category,
         payload.display_order,
         payload.active,
+        audit_actor=manager_name,
     )
 
-    _write_audit("update_button", manager_name, "button", button_id, before, updated)
 
     return updated
 
@@ -498,40 +539,46 @@ def force_close_run(
             detail=f"Production Run {run_id} is not Active (current status: {before['status']}).",
         )
 
-    finished_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    reason_text = payload.reason if payload.reason != "Other" else f"Other: {payload.note}"
+    finished_at = datetime.now(timezone.utc).replace(microsecond=0)
 
-    closed = _safe_db_call(
-        "force_close_production_run", force_close_production_run, run_id, finished_at
-    )
+    try:
+        closed = _safe_db_call(
+            "force_close_production_run",
+            force_close_production_run,
+            run_id,
+            finished_at,
+            f"{manager_name} (manager force-close)",
+            reason=reason_text, manager_name=manager_name,
+        )
+
+    except PulseCaptureError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.message)
 
     if closed is None:
-        # The partial unique index + WHERE status='Active' already
-        # prevented a double-close; someone else closed/changed it
-        # between our check above and this update.
+        # The row lock + WHERE status='Active' already prevented a
+        # double-close; someone else closed/changed it between our check
+        # above and this update.
         raise HTTPException(
             status_code=409,
             detail=f"Production Run {run_id} was already closed by someone else.",
         )
 
-    reason_text = payload.reason if payload.reason != "Other" else f"Other: {payload.note}"
-
-    _write_audit(
-        "force_close_run",
-        manager_name,
-        "production_run",
-        run_id,
-        before,
-        closed,
-        reason=reason_text,
-    )
+    ended_stop = closed.get("ended_planned_stop")
 
     return {
         "status": "success",
         "run_id": closed["id"],
         "production_line": closed["production_line"],
         "run_status": closed["status"],
+        "finished_at": closed["finished_at"],
         "closed_by": manager_name,
         "reason": reason_text,
+        "ended_planned_stop": (
+            {"reason": ended_stop["reason"], "started_at": ended_stop["started_at"], "ended_at": ended_stop["ended_at"]}
+            if ended_stop
+            else None
+        ),
     }
 
 
@@ -559,7 +606,7 @@ def resolve_period(period, date_from, date_to):
     if not period or period == "custom":
         return date_from, date_to
 
-    today = date.today()
+    today = datetime.now(ZoneInfo("Europe/London")).date()
 
     if period == "today":
         return today, today
@@ -651,7 +698,7 @@ def technician_performance(
     insufficient_data = []
 
     for entry in results:
-        if entry["completed_runs"] < MIN_SAMPLE_RUNS:
+        if entry["completed_runs"] < MIN_SAMPLE_RUNS or entry.get("coverage_complete") is False:
             # Too few runs to trust the percentage either way - always
             # "Insufficient data", regardless of what the percentage is.
             entry["label"] = "Insufficient data"
@@ -775,19 +822,21 @@ def set_weekly_targets(
         manager_name,
     )
 
-    for previous, saved in results:
-        _write_audit(
-            action="set_weekly_tonnage_target",
-            manager_name=manager_name,
-            record_type="weekly_tonnage_target",
-            record_id=f"{resolved.isoformat()}:{saved['scope']}:{saved['production_line'] or 'site'}",
-            previous_value=None if previous is None else _target_api(previous),
-            new_value=_target_api(saved),
-        )
-
     return {
         "status": "success",
         "week": week_window_starting(resolved).to_api(),
         "week_start": resolved,
         "targets": [_target_api(saved) for _previous, saved in results],
     }
+
+
+@router.get("/task-performance")
+def task_performance(manager_name: str = Depends(management_auth.require_management_session)):
+    from .database import get_rovema_task_evidence
+    from .task_performance import build_task_performance
+    from .main import line_technicians_by_line
+    until = datetime.now(timezone.utc)
+    since = until - timedelta(days=90)
+    rows = _safe_db_call("get_rovema_task_evidence", get_rovema_task_evidence, since, until)
+    return {**build_task_performance(rows, line_technicians_by_line["Rovema"]),
+            "since": since, "until": until}

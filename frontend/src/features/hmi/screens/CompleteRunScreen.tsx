@@ -1,3 +1,4 @@
+import { OperatingContext } from '../../shared/OperatingContext'
 import { completeRunFormErrors } from '../validation'
 import type { CompleteRunFormValues, CompletionPreviewResponse, RunState } from '../types'
 
@@ -17,6 +18,8 @@ interface CompleteRunScreenProps {
   onReview: () => void
   onBackToEdit: () => void
   onConfirm: () => void
+  /** Missed hours must be reported, one by one, before End Run. */
+  onReportMissed?: () => void
 }
 
 export function CompleteRunScreen({
@@ -32,22 +35,60 @@ export function CompleteRunScreen({
   onReview,
   onBackToEdit,
   onConfirm,
+  onReportMissed,
 }: CompleteRunScreenProps) {
   const errors = completeRunFormErrors(values)
+  const dueHours = (state.hours?.hours ?? []).filter((hour) => hour.status === 'due')
+  const finalHour = state.hours?.current_hour ?? null
+  const finalHourText = finalHour
+    ? `${finalHour.hour_label.split('–')[0]} (the final part hour)`
+    : 'the last reported hour'
+
+  if (dueHours.length > 0 && !preview) {
+    return (
+      <div className="hmi-screen hmi-complete-run">
+        <h1>End Run — {state.run.production_line}</h1>
+        <p className="hmi-inline-warning" role="alert">
+          Report {dueHours.length === 1 ? 'this hour' : `these ${dueHours.length} hours`} before ending
+          the run: {dueHours.map((hour) => hour.hour_label).join(', ')}. Each hour is entered on its own.
+        </p>
+        <div className="hmi-form-actions">
+          <button type="button" className="hmi-secondary-button" onClick={onCancel}>
+            Back
+          </button>
+          {onReportMissed && (
+            <button type="button" className="hmi-primary-button" onClick={onReportMissed}>
+              Report Missed Hours
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   if (preview) {
     return (
       <div className="hmi-screen hmi-complete-run">
-        <h1>Complete Run — review</h1>
+        <h1>End Run — review</h1>
         <p>These figures are calculated by Pulse from what has been recorded.</p>
 
+        {preview.loss_review && <div role="status">
+          <OperatingContext reports={preview.loss_review.operating_context} />
+          <p>Remaining production gap: {preview.loss_review.remaining_gap_packs ?? 'Unknown standard'} packs
+            ({preview.loss_review.equivalent_minutes ?? '—'} equivalent minutes). This is not measured downtime.</p>
+          {preview.loss_review.prompt_required && <p>Please add what you know below. Cause unknown is allowed; the gap stays available for investigation.</p>}
+          {preview.loss_review.limitations.map(message => <p key={message}>{message}</p>)}
+          <label className="hmi-field">Reported explanation (optional; leave blank for cause unknown)
+            <textarea value={values.lossReason ?? ''} onChange={e => onChange('lossReason', e.target.value)} />
+          </label>
+        </div>}
         <dl className="hmi-review-list">
           <div className="hmi-review-list__row">
             <dt>Total pallets recorded</dt>
             <dd>{preview.total_pallets_recorded}</dd>
           </div>
           <div className="hmi-review-list__row">
-            <dt>Final pallets this period</dt>
+            <dt>Final part hour pallets</dt>
             <dd>{preview.final_pallets_produced}</dd>
           </div>
           <div className="hmi-review-list__row">
@@ -93,7 +134,7 @@ export function CompleteRunScreen({
 
         {preview.can_complete ? (
           <p className="hmi-inline-warning" role="alert">
-            This will close the active run. This cannot be undone from the HMI.
+            This ends the run and stops its output clock. This cannot be undone from the HMI.
           </p>
         ) : (
           <p className="hmi-inline-error" role="alert">
@@ -123,7 +164,7 @@ export function CompleteRunScreen({
             onClick={onConfirm}
             disabled={isSubmitting || !preview.can_complete}
           >
-            {isSubmitting ? 'Completing…' : 'Confirm Complete Run'}
+            {isSubmitting ? 'Ending…' : 'Confirm End Run'}
           </button>
         </div>
       </div>
@@ -132,10 +173,10 @@ export function CompleteRunScreen({
 
   return (
     <div className="hmi-screen hmi-complete-run">
-      <h1>Complete Run — {state.run.production_line}</h1>
+      <h1>End Run — {state.run.production_line}</h1>
 
       <fieldset className="hmi-field">
-        <legend>Has any production been made since the last saved hourly update?</legend>
+        <legend>Has any production been made since {finalHourText}?</legend>
         <label className="hmi-radio">
           <input
             type="radio"
@@ -163,7 +204,7 @@ export function CompleteRunScreen({
 
       {values.productionSinceLastUpdate === 'yes' && (
         <label className="hmi-field">
-          Final pallets produced since the last update
+          Pallets produced in the final part hour
           <input
             type="text"
             inputMode="decimal"

@@ -13,9 +13,11 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 
 try:
+    from .api_logging import log_operation_failure
     from . import pulse_calculations as calc
     from .database import get_hmi_line_state, get_public_hmi_config
 except ImportError:
+    from api_logging import log_operation_failure
     import pulse_calculations as calc
     from database import get_hmi_line_state, get_public_hmi_config
 
@@ -79,9 +81,8 @@ def hmi_config():
     try:
         rows = get_public_hmi_config()
 
-    except Exception:
-        print("DATABASE ERROR")
-        print("Could not load HMI configuration.")
+    except Exception as error:
+        log_operation_failure("hmi", "get_public_hmi_config", error)
 
         raise HTTPException(
             status_code=503,
@@ -128,7 +129,46 @@ def _latest_activity(row):
     return max(recorded) if recorded else None
 
 
+def _open_stoppage_api(row, now):
+    """The Changeover / Other stop running on the line between runs, if
+    any. elapsed_minutes is measured from the server clock."""
+    if row.get("stoppage_id") is None:
+        return None
+    started_at = row["stoppage_started_at"]
+    return {
+        "stoppage_id": row["stoppage_id"],
+        "kind": row["stoppage_kind"],
+        "reason": row.get("stoppage_reason"),
+        "started_at": started_at,
+        "started_by": row.get("stoppage_started_by"),
+        "elapsed_minutes": calc.as_number(calc.minutes_between(started_at, now), calc.MINUTES_PLACES),
+        # Changeover: set once End Changeover is pressed; the event keeps
+        # running (new-run setup) until the new run starts.
+        "physical_ended_at": row.get("stoppage_physical_ended_at"),
+    }
+
+
 def _line_state_api(row, now):
+    awaiting = bool(row.get("awaiting_next_step")) and row.get("run_id") is None
+    return {
+        **_run_line_state_api(row, now),
+        # Faults still open on the line from ANY run - an incoming
+        # technician must acknowledge them before starting a run.
+        "line_open_fault_count": int(row.get("line_open_fault_count") or 0),
+        "open_stoppage": _open_stoppage_api(row, now),
+        "awaiting_next_step": (
+            {
+                "run_id": row["last_run_id"],
+                "line_technician": row.get("last_run_technician"),
+                "finished_at": row.get("last_run_finished_at"),
+            }
+            if awaiting
+            else None
+        ),
+    }
+
+
+def _run_line_state_api(row, now):
     run_id = row.get("run_id")
     has_active_run = run_id is not None
 
@@ -185,9 +225,8 @@ def hmi_line_state():
     try:
         rows = get_hmi_line_state()
 
-    except Exception:
-        print("DATABASE ERROR")
-        print("Could not load production line state.")
+    except Exception as error:
+        log_operation_failure("hmi", "get_hmi_line_state", error)
 
         raise HTTPException(
             status_code=503,

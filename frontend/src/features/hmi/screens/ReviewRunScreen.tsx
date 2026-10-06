@@ -6,6 +6,7 @@ interface ReviewRunScreenProps {
   errorMessage: string | null
   onBack: () => void
   onConfirm: () => void
+  timerNotice?: string | null
 }
 
 const ROWS: Array<[label: string, field: keyof StartRunFormValues]> = [
@@ -18,7 +19,6 @@ const ROWS: Array<[label: string, field: keyof StartRunFormValues]> = [
   ['Pack weight (kg)', 'packWeightKg'],
   ['Packs per case', 'packsPerCase'],
   ['Format', 'packType'],
-  ['Target speed (packs/min)', 'targetSpeedPpm'],
   ['Cases per pallet', 'casesPerPallet'],
   ['Pallets remaining', 'palletsRemaining'],
   ['Previous run completed', 'previousRunCompleted'],
@@ -30,10 +30,16 @@ export function ReviewRunScreen({
   errorMessage,
   onBack,
   onConfirm,
+  timerNotice = null,
 }: ReviewRunScreenProps) {
   return (
     <div className="hmi-screen hmi-review-run">
       <h1>Review Run</h1>
+      {timerNotice && (
+        <p className="hmi-timer-notice" role="status">
+          ⏱ {timerNotice}
+        </p>
+      )}
 
       <dl className="hmi-review-list">
         {ROWS.map(([label, field]) => (

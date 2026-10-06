@@ -49,17 +49,11 @@ ACHIEVEMENT_AMBER_PERCENT = Decimal(85)
 DEFAULT_STALE_AFTER_MINUTES = 75
 
 ATTRIBUTION_METHOD = (
-    "Estimated. Planned downtime and unplanned (fault) downtime are "
-    "converted to lost packs at each run's own target speed (packs per "
-    "minute x minutes), then to pallets and tonnes using that run's "
-    "pack configuration. Only downtime inside both the run's reported "
-    "hourly periods and the selected window is counted. Overlapping "
-    "events are merged, and time covered by planned downtime is never "
-    "counted again as unplanned. Planned is attributed first, then "
-    "unplanned, and the total is capped at the measured output gap. "
-    "The remainder is split into 'other or speed loss' (shortfall in "
-    "hourly periods where the technician recorded a loss reason) and "
-    "'unexplained gap'."
+    "Modelled output equivalents, not confirmed causes. Fixed agreed standard x scheduled minutes. "
+    "Recorded stops are unioned with planned precedence. Operating reports provide context only. "
+    "Allocation is capped per reporting interval: planned, then unplanned. "
+    "This order is an accounting convention. Notes do not quantify loss. Raw excess is retained. "
+    "Variance = actual minus target; later overproduction does not erase earlier shortfalls."
 )
 
 
@@ -180,10 +174,14 @@ def hourly_update_values(
     period_minutes,
     planned_downtime_minutes,
     progress: dict,
+    expected_packs=None,
 ) -> dict:
     """Values persisted for one hourly update. Expected output covers
     the actual elapsed period (target speed x period minutes), not a
-    fixed 60 minutes. Run progress mirrors src/main.py's
+    fixed 60 minutes. `expected_packs`, when given, is the target
+    already integrated over a speed change inside the period
+    (target_packs_between); lost minutes then use the period's average
+    target speed. Run progress mirrors src/main.py's
     update_run_progress(): pallets reduce pallets_remaining until it
     reaches zero, anything beyond becomes potential overrun - but with
     exact Decimal arithmetic, so 3.75 + 3.75 + ... never drifts."""
@@ -195,7 +193,12 @@ def hourly_update_values(
     if minutes <= 0:
         raise ValueError("An hourly period must be longer than zero minutes.")
 
-    expected_packs = config.minutes_to_packs(minutes)
+    if expected_packs is None:
+        expected_packs = config.minutes_to_packs(minutes)
+        loss_speed = config.target_speed_ppm
+    else:
+        expected_packs = to_decimal(expected_packs)
+        loss_speed = expected_packs / minutes if expected_packs > 0 else config.target_speed_ppm
     actual_packs = config.pallets_to_packs(pallets)
     lost_packs = max(expected_packs - actual_packs, ZERO)
 
@@ -219,7 +222,7 @@ def hourly_update_values(
         "expected_pallets": for_storage(config.packs_to_pallets(expected_packs)),
         "production_variance_packs": for_storage(actual_packs - expected_packs),
         "estimated_lost_packs": for_storage(lost_packs),
-        "estimated_lost_minutes": for_storage(lost_packs / config.target_speed_ppm),
+        "estimated_lost_minutes": for_storage(lost_packs / loss_speed),
         "planned_downtime_minutes": for_storage(planned_downtime_minutes),
         "period_minutes": for_storage(minutes),
         "pallets_remaining": for_storage(remaining),
@@ -573,6 +576,101 @@ class GapAttribution:
         }
 
 
+def operating_timeline(changes):
+    """Only explicit operating records. Before the first setting is unknown.
+    Append-only corrections supersede a record, never historical target changes.
+    Same effective instant: latest submitted revision wins deterministically.
+    """
+    superseded = {r.get("supersedes_id") for r in changes if r.get("supersedes_id") is not None}
+    active = sorted((r for r in changes if r.get("id") not in superseded),
+                    key=lambda r: (r["effective_at"], r.get("id", 0)))
+    return [(None, None)] + [(r["effective_at"], to_decimal(r["new_speed_ppm"])) for r in active]
+
+
+def operating_context(records, start, end):
+    """Reported context, including correction history; never quantitative loss evidence.
+    Include reports effective before period end (a setting can carry into a later period).
+    Legacy tuple timelines are accepted for compatibility but contain no auditable report.
+    """
+    superseded = {r.get("supersedes_id") for r in records if isinstance(r, dict)}
+    return [dict(period_start=start.isoformat(), period_end=end.isoformat(),
+                 run_id=r.get("production_run_id"), report_id=r.get("id"),
+                 speed_ppm=as_number(to_decimal(r["new_speed_ppm"]), STORAGE_PLACES),
+                 effective_at=r["effective_at"].isoformat(),
+                 submitted_at=r["submitted_at"].isoformat() if r.get("submitted_at") else None,
+                 reason=r.get("reason"), changed_by=r.get("changed_by"),
+                 supersedes_id=r.get("supersedes_id"), superseded=r.get("id") in superseded)
+            for r in records if isinstance(r, dict) and r["effective_at"] < end]
+
+
+def reconcile_production(standard, start, end, actual_packs, planned=(), unplanned=(),
+                         operating=(), not_scheduled=(), note=None):
+    """Calculation authority. Decimal quantities; actual is reported palletised packs.
+    None is missing, never zero. Equivalent minutes are NOT measured downtime.
+    No text is used in arithmetic. An absent standard never becomes a fabricated one.
+    """
+    rate = to_decimal(standard)
+    coverage = subtract_intervals([(start, end)], not_scheduled) if end > start else []
+    planned_union = intersect_intervals(planned, coverage)
+    unplanned_union = subtract_intervals(intersect_intervals(unplanned, coverage), planned_union)
+    minutes = total_minutes(coverage)
+    pm, um = total_minutes(planned_union), total_minutes(unplanned_union)
+    limitations = []
+    actual = to_decimal(actual_packs)
+    result = dict(target_packs=None, actual_packs=actual, signed_variance_packs=None,
+                  shortfall_packs=None, overproduction_packs=None, remaining_gap_packs=None,
+                  equivalent_minutes=None, prompt_required=False, scheduled_minutes=minutes,
+                  planned_minutes=pm, unplanned_minutes=um,
+                  raw_planned_packs=None, raw_unplanned_packs=None,
+                  allocated_planned_packs=None, allocated_unplanned_packs=None,
+                  excess_modelled_packs=None,
+                  reported_explanation=note, operating_context=operating_context(operating, start, end),
+                  limitations=limitations, comparable=False)
+    if rate is None or rate <= ZERO:
+        limitations.append("Agreed standard unknown: legacy target history is not an operating setting.")
+        if actual is None:
+            limitations.append("Production reading missing.")
+        return result
+    target = rate * minutes
+    raw_p, raw_u = rate * pm, rate * um
+    result.update(target_packs=target, raw_planned_packs=raw_p, raw_unplanned_packs=raw_u)
+    if actual is None:
+        limitations.append("Production reading missing: excluded from comparable totals.")
+        return result
+    gap, over = max(target - actual, ZERO), max(actual - target, ZERO)
+    ap = min(gap, raw_p)
+    au = min(gap - ap, raw_u)
+    residual = max(gap - raw_p - raw_u, ZERO)
+    excess = max(raw_p + raw_u - gap, ZERO)
+    if excess:
+        limitations.append("Modelled contributions exceed observed shortfall; stop timing/output need review.")
+    result.update(signed_variance_packs=actual-target, shortfall_packs=gap,
+                  overproduction_packs=over, remaining_gap_packs=residual,
+                  equivalent_minutes=residual/rate, prompt_required=residual/rate >= Decimal(10),
+                  allocated_planned_packs=ap, allocated_unplanned_packs=au,
+                  excess_modelled_packs=excess, comparable=True)
+    return result
+
+
+def reconciliation_api(result):
+    return {k: as_number(v, MINUTES_PLACES if k.endswith("minutes") else PACKS_PLACES)
+            if isinstance(v, Decimal) else v for k, v in result.items()}
+
+
+def summarise_reconciliations(results):
+    covered = [r for r in results if r["comparable"]]
+    fields = ("target_packs", "actual_packs", "signed_variance_packs", "shortfall_packs",
+              "overproduction_packs", "remaining_gap_packs", "raw_planned_packs",
+              "raw_unplanned_packs", "allocated_planned_packs",
+              "allocated_unplanned_packs", "excess_modelled_packs")
+    return {**{k: sum((r[k] for r in covered), ZERO) for k in fields},
+            "operating_context": [context for r in results for context in r.get("operating_context", [])],
+            "covered_periods": len(covered), "total_periods": len(results),
+            "coverage_complete": bool(results) and len(covered) == len(results),
+            "reported_explanations": [r["reported_explanation"] for r in results if r.get("reported_explanation")],
+            "limitations": sorted({message for r in results for message in r["limitations"]})}
+
+
 def attribute_run_gap(
     config: PackConfig,
     periods,
@@ -591,70 +689,31 @@ def attribute_run_gap(
     `end` of an open event must already be set to `now` by the caller.
     """
     result = GapAttribution.empty()
-
-    if not periods:
-        return result
-
-    lower = max(window_start, run_start)
-    upper = min(window_end, run_end)
-
-    coverage = merge_intervals(
-        clip_interval((p["start"], p["end"]), lower, upper) for p in periods
-    )
-
-    planned_by_reason = {}
-    for event in planned_events:
-        pieces = intersect_intervals([(event["start"], event["end"])], coverage)
-        planned_by_reason.setdefault(event["reason"], []).extend(pieces)
-
-    planned_union = merge_intervals(i for pieces in planned_by_reason.values() for i in pieces)
-
-    faults_by_machine = {}
-    for event in fault_events:
-        pieces = intersect_intervals([(event["start"], event["end"])], coverage)
-        pieces = subtract_intervals(pieces, planned_union)
-        faults_by_machine.setdefault(event["machine"], []).extend(pieces)
-
-    unplanned_union = merge_intervals(i for pieces in faults_by_machine.values() for i in pieces)
-
-    planned_minutes = total_minutes(planned_union)
-    unplanned_minutes = total_minutes(unplanned_union)
-    planned_potential = config.minutes_to_packs(planned_minutes)
-    unplanned_potential = config.minutes_to_packs(unplanned_minutes)
-
-    expected = sum((to_decimal(p["expected_packs"]) for p in periods), ZERO)
-    actual = sum((config.pallets_to_packs(p["actual_pallets"]) for p in periods), ZERO)
-    gap = max(expected - actual, ZERO)
-
-    planned_attributed = min(planned_potential, gap)
-    unplanned_attributed = min(unplanned_potential, gap - planned_attributed)
-    remainder = gap - planned_attributed - unplanned_attributed
-
-    explained_shortfall = sum(
-        (
-            max(to_decimal(p["expected_packs"]) - config.pallets_to_packs(p["actual_pallets"]), ZERO)
-            for p in periods
-            if p.get("loss_reason_recorded")
-        ),
-        ZERO,
-    )
-    other = min(remainder, explained_shortfall)
-    unexplained = remainder - other
-
-    result.measured_gap.add(config, gap)
-    result.planned_downtime.add(config, planned_attributed, planned_minutes)
-    result.unplanned_downtime.add(config, unplanned_attributed, unplanned_minutes)
-    result.other_or_speed_loss.add(config, other)
-    result.unexplained_gap.add(config, unexplained)
-    result.planned_downtime_uncapped.add(config, planned_potential, planned_minutes)
-    result.unplanned_downtime_uncapped.add(config, unplanned_potential, unplanned_minutes)
-
-    # Share each capped total across machines / reasons by their own
-    # merged minutes, so a breakdown always sums to the capped total
-    # and a machine can never be credited more than the gap.
-    _allocate(result.by_machine, faults_by_machine, unplanned_attributed, config)
-    _allocate(result.by_planned_reason, planned_by_reason, planned_attributed, config)
-
+    for period in periods:
+        start, end = max(period["start"], window_start, run_start), min(period["end"], window_end, run_end)
+        if end <= start:
+            continue
+        planned = [(e["start"], e["end"]) for e in planned_events]
+        faults = [(e["start"], e["end"]) for e in fault_events]
+        r = reconcile_production(config.target_speed_ppm, start, end,
+                                 config.pallets_to_packs(period["actual_pallets"]), planned, faults,
+                                 period.get("operating", ()))
+        result.measured_gap.add(config, r["shortfall_packs"])
+        result.planned_downtime.add(config, r["allocated_planned_packs"], r["planned_minutes"])
+        result.unplanned_downtime.add(config, r["allocated_unplanned_packs"], r["unplanned_minutes"])
+        # Deprecated compatibility bucket remains zero: reports never allocate loss.
+        result.unexplained_gap.add(config, r["remaining_gap_packs"])
+        result.planned_downtime_uncapped.add(config, r["raw_planned_packs"], r["planned_minutes"])
+        result.unplanned_downtime_uncapped.add(config, r["raw_unplanned_packs"], r["unplanned_minutes"])
+        coverage = [(start, end)]
+        pu = intersect_intervals(planned, coverage)
+        machines, reasons = {}, {}
+        for e in fault_events:
+            machines.setdefault(e["machine"], []).extend(subtract_intervals(intersect_intervals([(e["start"], e["end"])], coverage), pu))
+        for e in planned_events:
+            reasons.setdefault(e["reason"], []).extend(intersect_intervals([(e["start"], e["end"])], coverage))
+        _allocate(result.by_machine, machines, r["allocated_unplanned_packs"], config)
+        _allocate(result.by_planned_reason, reasons, r["allocated_planned_packs"], config)
     return result
 
 
@@ -667,6 +726,333 @@ def _allocate(target: dict, pieces_by_key: dict, attributed_packs: Decimal, conf
             continue
         share = attributed_packs * minutes / total
         target.setdefault(key, LossBucket()).add(config, share, minutes)
+
+
+# ==========================================================
+# FIXED CLOCK HOURS: Output vs target (all stops)
+# ==========================================================
+#
+# One reading = the pallets a product run made in one named clock hour
+# (06:00-07:00). Two denominators, deliberately different:
+#
+#   RUN  % = run actual packs / run target packs, where the run's target
+#            is its own target speed(s) x the minutes of the hour the
+#            run was open (its "applicable" time). Every stop inside
+#            that time - planned or unplanned - already lowers the
+#            result, because it lowers actual output while the target
+#            keeps counting. Stopped minutes are shown BESIDE the
+#            percentage; they are never subtracted again.
+#
+#   LINE % = sum of run actual packs / (sum of run target packs + the
+#            line's between-run stoppage minutes (Changeover, Other)
+#            x the outgoing run's target speed). A changeover or other
+#            line stop therefore lowers the LINE hour without being
+#            charged to either product run. Time on the line covered by
+#            no run and no recorded stop (e.g. a handover gap) is
+#            reported as "unaccounted" minutes and is not in the
+#            denominator - nothing is invented for it.
+#
+# An hour with no reading is "no_reading" (null), never 0%.
+
+OUTPUT_VS_TARGET_LABEL = "Output vs target (all stops)"
+OUTPUT_VS_TARGET_METHOD = (
+    "Output vs target (all stops) = actual packs / target packs for the "
+    "applicable time. Target packs = target speed x minutes, using the "
+    "fixed agreed standard for new runs. Unknown legacy standards are flagged. Every planned and "
+    "unplanned stop lowers it; stopped minutes are shown alongside, never "
+    "subtracted a second time. Quality is not measured, so this is not OEE."
+)
+LOW_OUTPUT_PERCENT = Decimal(60)
+
+
+def speed_timeline(current_speed_ppm, changes) -> list:
+    """[(effective_from, speed)], the first entry effective from the run
+    start (None). `changes` are the run's recorded target-speed changes;
+    each applies forward from its own effective time only. The run row
+    holds the CURRENT speed, so the starting speed is the first change's
+    previous speed."""
+    ordered = sorted(changes, key=lambda change: change["effective_at"])
+    if ordered:
+        initial = to_decimal(ordered[0]["previous_speed_ppm"])
+    else:
+        initial = to_decimal(current_speed_ppm)
+    return [(None, initial)] + [
+        (change["effective_at"], to_decimal(change["new_speed_ppm"])) for change in ordered
+    ]
+
+
+def speed_at(timeline, moment: datetime) -> Decimal:
+    speed = timeline[0][1]
+    for effective_from, value in timeline[1:]:
+        if effective_from <= moment:
+            speed = value
+    return speed
+
+
+def speed_segments(timeline, start: datetime, end: datetime) -> list:
+    """[(start, end, speed)] covering [start, end) exactly."""
+    if end <= start:
+        return []
+    cuts = [moment for moment, _speed in timeline[1:] if start < moment < end]
+    bounds = [start, *cuts, end]
+    return [(a, b, speed_at(timeline, a)) for a, b in zip(bounds, bounds[1:])]
+
+
+def target_packs_between(timeline, start: datetime, end: datetime) -> Decimal:
+    return sum(
+        (speed * minutes_between(a, b) for a, b, speed in speed_segments(timeline, start, end)),
+        ZERO,
+    )
+
+
+def _clip_all(intervals, coverage):
+    return intersect_intervals([(s, e) for s, e in intervals if s < e], coverage)
+
+
+def classify_stops(coverage, planned, unplanned) -> dict:
+    """Stopped time inside `coverage` (a list of intervals), each minute
+    counted ONCE. planned / unplanned: [(start, end, reason)]. Where a
+    planned and an unplanned stop overlap, the overlap is planned (the
+    line was already stopped on purpose). Per-reason minutes are each
+    reason's own time and can overlap one another; `stopped_minutes` is
+    the authority."""
+    coverage = merge_intervals(coverage)
+    planned_union = _clip_all([(s, e) for s, e, _r in planned], coverage)
+    unplanned_union = subtract_intervals(
+        _clip_all([(s, e) for s, e, _r in unplanned], coverage), planned_union
+    )
+
+    reasons = {}
+    for kind, events, removed in (("planned", planned, []), ("unplanned", unplanned, planned_union)):
+        for start, end, reason in events:
+            pieces = _clip_all([(start, end)], coverage)
+            if removed:
+                pieces = subtract_intervals(pieces, removed)
+            reasons.setdefault((kind, reason), []).extend(pieces)
+
+    planned_minutes = total_minutes(planned_union)
+    unplanned_minutes = total_minutes(unplanned_union)
+    return {
+        "planned_minutes": planned_minutes,
+        "unplanned_minutes": unplanned_minutes,
+        "stopped_minutes": planned_minutes + unplanned_minutes,
+        "reasons": [
+            {"kind": kind, "reason": reason, "minutes": total_minutes(pieces)}
+            for (kind, reason), pieces in sorted(reasons.items(), key=lambda item: (item[0][0], str(item[0][1])))
+            if total_minutes(pieces) > 0
+        ],
+    }
+
+
+def reading_window(hour_start: datetime, run_start: datetime, run_end: datetime | None):
+    """The part of a clock hour a run can report output for: the hour
+    clipped to the run. None when the run was not open in that hour."""
+    hour_end = hour_start + timedelta(hours=1)
+    start = max(hour_start, run_start)
+    end = hour_end if run_end is None else min(hour_end, run_end)
+    return (start, end) if start < end else None
+
+
+def unexplained_hour_loss(timeline, start, end, actual_packs, stops):
+    """LEGACY historical-target helper, retained for old-data tests only.
+    Active capture and reports use reconcile_production.
+    Residual output gap after the union of recorded stops, at their
+    historical target speeds. Equivalent minutes use this period's
+    time-weighted target speed; this is an estimate, not extra downtime."""
+    target = target_packs_between(timeline, start, end)
+    pieces = intersect_intervals(stops, [(start, end)])
+    stop_capacity = sum((target_packs_between(timeline, a, b) for a, b in pieces), ZERO)
+    gap = max(ZERO, target - to_decimal(actual_packs))
+    remaining = max(ZERO, gap - stop_capacity)
+    minutes = minutes_between(start, end)
+    average_speed = target / minutes if minutes > ZERO else ZERO
+    equivalent = remaining / average_speed if average_speed > ZERO else ZERO
+    return {
+        "target_packs": as_number(target, PACKS_PLACES),
+        "remaining_gap_packs": as_number(remaining, PACKS_PLACES),
+        "equivalent_minutes": as_number(equivalent, MINUTES_PLACES),
+        "prompt_required": equivalent >= Decimal(10),
+    }
+
+
+def run_hour_result(
+    hour_start: datetime,
+    now: datetime,
+    run_start: datetime,
+    run_end: datetime | None,
+    timeline,
+    packs_per_pallet,
+    pallets,
+    planned,
+    unplanned,
+    standard="legacy",
+    operating=(),
+) -> dict | None:
+    """One product run's result for one clock hour, or None if the run
+    was not open in it. `pallets` is the reading (None = not reported).
+    Stops are shown beside the result; they already lowered it."""
+    window = reading_window(hour_start, run_start, run_end)
+    if window is None or window[0] >= now:
+        return None
+
+    start, final_end = window
+    in_progress = final_end > now
+    end = min(final_end, now)
+    minutes = minutes_between(start, end)
+    target = target_packs_between(timeline, start, end)
+    stops = classify_stops([(start, end)], planned, unplanned)
+
+    actual = None
+    if pallets is not None and not in_progress:
+        actual = to_decimal(pallets) * to_decimal(packs_per_pallet)
+
+    if in_progress:
+        status = "in_progress"
+    elif actual is None:
+        status = "no_reading"
+    else:
+        status = "reported"
+
+    reconciliation = reconcile_production(
+        timeline[0][1] if standard == "legacy" else standard, start, end, actual,
+        [(a,b) for a,b,_ in planned], [(a,b) for a,b,_ in unplanned], operating)
+    if standard != "legacy":
+        target = reconciliation["target_packs"]
+    return {
+        "reconciliation": reconciliation,
+        "applicable_start": start,
+        "applicable_end": end,
+        "applicable_minutes": minutes,
+        "is_partial_hour": minutes < SIXTY,
+        "status": status,
+        "target_packs": target,
+        "actual_packs": actual,
+        "output_vs_target_percent": None if actual is None else percent(actual, target),
+        "actual_speed_ppm": None if actual is None or minutes <= 0 else actual / minutes,
+        "target_speeds": [
+            {"from": a, "to": b, "speed_ppm": speed} for a, b, speed in speed_segments(timeline, start, end)
+        ] if standard is not None else [],
+        **stops,
+    }
+
+
+NOT_SCHEDULED = "not_scheduled"
+NOT_SCHEDULED_REASON = "Not scheduled"
+
+
+def line_hour_result(hour_start: datetime, now: datetime, run_results, stoppages, planned, unplanned) -> dict:
+    """The LINE's result for one clock hour.
+
+    run_results: run_hour_result() dicts for the runs open in the hour.
+    stoppages:   [{"start", "end", "kind", "reason", "reference_speed_ppm"}]
+                 - between-run line stops, open ones ended at `now` by the
+                 caller. A 'not_scheduled' stop is time the line was not
+                 scheduled to produce: it is accounted for (never
+                 "unaccounted"), but it is in NO target and in neither
+                 planned nor unplanned downtime - a fault open across it
+                 is not charged for it either.
+    planned / unplanned: [(start, end, reason)] for the whole line -
+                 run planned stops + changeovers; faults + Other stops.
+    """
+    hour_end = min(hour_start + timedelta(hours=1), now)
+    run_cover = merge_intervals((r["applicable_start"], r["applicable_end"]) for r in run_results)
+
+    stoppage_target = ZERO
+    stoppage_cover = []
+    not_scheduled_cover = []
+    missing_reference = False
+    for stop in stoppages:
+        pieces = subtract_intervals(
+            _clip_all([(stop["start"], stop["end"])], [(hour_start, hour_end)]), run_cover
+        )
+        if not pieces:
+            continue
+        if stop.get("kind") == NOT_SCHEDULED:
+            not_scheduled_cover.extend(pieces)
+            continue
+        stoppage_cover.extend(pieces)
+        speed = to_decimal(stop.get("reference_speed_ppm"))
+        if speed is None:
+            missing_reference = True
+            continue
+        stoppage_target += speed * total_minutes(pieces)
+
+    scheduled = merge_intervals(run_cover + stoppage_cover)
+    not_scheduled = subtract_intervals(merge_intervals(not_scheduled_cover), scheduled)
+    not_scheduled_minutes = total_minutes(not_scheduled)
+    covered_minutes = total_minutes(scheduled) + not_scheduled_minutes
+    clock_minutes = minutes_between(hour_start, hour_end) if hour_end > hour_start else ZERO
+
+    statuses = {r["status"] for r in run_results}
+    if not run_results and not stoppage_cover and not_scheduled:
+        # Only Not scheduled time: no target, so no percentage - it is
+        # not a 0% hour.
+        status = "not_scheduled"
+    elif not run_results and not stoppage_cover:
+        # Nothing ran and nothing was stopped on purpose: the line was
+        # idle, even in the current hour.
+        status = "idle"
+    elif "in_progress" in statuses or hour_start + timedelta(hours=1) > now:
+        status = "in_progress"
+    elif "no_reading" in statuses:
+        status = "no_reading"
+    elif run_results:
+        status = "reported"
+    elif stoppage_cover:
+        status = "stopped"
+    else:
+        status = "idle"
+
+    target = (None if missing_reference or any(r["target_packs"] is None for r in run_results)
+              else sum((r["target_packs"] for r in run_results), ZERO) + stoppage_target)
+    actual = None
+    if status in ("reported", "stopped"):
+        # A line with no product run open makes no product: 0 is a fact.
+        actual = sum((r["actual_packs"] for r in run_results), ZERO)
+
+    return {
+        "status": status,
+        "target_packs": target,
+        "actual_packs": actual,
+        "output_vs_target_percent": None if actual is None else percent(actual, target),
+        "covered_minutes": covered_minutes,
+        "unaccounted_minutes": max(clock_minutes - covered_minutes, ZERO),
+        "not_scheduled_minutes": not_scheduled_minutes,
+        "stoppage_reference_missing": missing_reference,
+        # Downtime is only classified inside scheduled time.
+        **classify_stops(scheduled, planned, unplanned),
+    }
+
+
+# ==========================================================
+# LINE STOP RECLASSIFICATION RULES (manager corrections)
+# ==========================================================
+# Shared by the database write and the dashboard, so the choices a manager
+# is offered are exactly the ones the database accepts.
+
+LINE_STOP_NEXT_STEP_KINDS = ("handover", "other", NOT_SCHEDULED)
+LINE_STOP_FOLLOWING_KINDS = ("restart_delay", NOT_SCHEDULED, "other")
+
+
+def allowed_line_stop_reclassifications(kind, follows_stoppage_id, has_follower) -> tuple:
+    """What a line stop may be reclassified as:
+      - a changeover: nothing (it carries a QA record and physical/setup split);
+      - a stop that follows a resolved Other (its Restart delay, possibly
+        already reclassified): restart_delay / not_scheduled / other;
+      - an Other that already has a Restart delay after it: its reason only;
+      - otherwise handover / other / not_scheduled."""
+    if kind == "changeover":
+        return ()
+    if follows_stoppage_id is not None:
+        return LINE_STOP_FOLLOWING_KINDS
+    if kind == "other" and has_follower:
+        return ("other",)
+    return LINE_STOP_NEXT_STEP_KINDS
+
+
+def is_low_output(percent_value) -> bool:
+    value = to_decimal(percent_value)
+    return value is not None and value < LOW_OUTPUT_PERCENT
 
 
 # ==========================================================

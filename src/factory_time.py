@@ -226,6 +226,74 @@ def resolve_window(kind: str, now: datetime) -> TimeWindow:
     raise ValueError(f"Unknown window '{kind}'.")
 
 
+# ----------------------------------------------------------
+# Factory clock hours (fixed-hour reporting)
+# ----------------------------------------------------------
+# An hourly reading is for one named clock hour, e.g. 06:00-07:00. UK
+# offsets from UTC are always whole hours, so a UTC hour boundary is
+# also a London hour boundary: a clock hour is identified by its UTC
+# start instant and always lasts exactly 60 real minutes. Across the
+# clock changes this gives 7 slots on the spring Night shift (the
+# 00:00 GMT slot ends at 02:00 BST) and 9 on the autumn Night shift
+# (01:00 BST and 01:00 GMT are two different slots).
+
+CLOCK_HOUR = timedelta(hours=1)
+
+
+def is_clock_hour_start(moment: datetime) -> bool:
+    utc = _require_aware(moment).astimezone(timezone.utc)
+    return utc.minute == 0 and utc.second == 0 and utc.microsecond == 0
+
+
+def clock_hour_start(moment: datetime) -> datetime:
+    """The start of the clock hour containing `moment`, as aware UTC."""
+    utc = _require_aware(moment).astimezone(timezone.utc)
+    return utc.replace(minute=0, second=0, microsecond=0)
+
+
+def clock_hours_between(start: datetime, end: datetime) -> list[datetime]:
+    """Start instants of every clock hour overlapping [start, end)."""
+    hours = []
+    cursor = clock_hour_start(start)
+    end_utc = _require_aware(end).astimezone(timezone.utc)
+    while cursor < end_utc:
+        hours.append(cursor)
+        cursor += CLOCK_HOUR
+    return hours
+
+
+def _has_clock_change(day: date) -> bool:
+    first = datetime.combine(day, time(0), tzinfo=FACTORY_TZ)
+    last = datetime.combine(day, time(23, 59), tzinfo=FACTORY_TZ)
+    return first.utcoffset() != last.utcoffset()
+
+
+def clock_hour_label(hour_start: datetime) -> str:
+    """'06:00–07:00' in London time. On a clock-change date each time
+    also carries its zone ('01:00 BST–01:00 GMT'), because the same
+    wall-clock hour can occur twice, or not at all."""
+    start = to_london(hour_start)
+    end = to_london(hour_start + CLOCK_HOUR)
+    if _has_clock_change(start.date()) or _has_clock_change(end.date()):
+        return f"{start:%H:%M} {start.tzname()}–{end:%H:%M} {end.tzname()}"
+    return f"{start:%H:%M}–{end:%H:%M}"
+
+
+def shift_window_containing(moment: datetime) -> TimeWindow:
+    """The shift instance (by the clock, not by any run's label) that
+    contains `moment`. Every clock hour lies wholly inside one shift,
+    because shifts change at 06:00, 14:00 and 22:00 London time."""
+    return current_shift_window(moment)
+
+
+def shift_window_offset(now: datetime, shifts_back: int) -> TimeWindow:
+    """The current shift (0), the previous one (1), and so on."""
+    window = current_shift_window(now)
+    for _ in range(shifts_back):
+        window = current_shift_window(window.start - timedelta(seconds=1))
+    return window
+
+
 def timedelta_seconds(delta: timedelta) -> Decimal:
     """Exact seconds (microsecond precision) as a Decimal - avoids the
     binary-float rounding of timedelta.total_seconds()."""

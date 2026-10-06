@@ -416,3 +416,84 @@ the backend and frontend together, after migration 0003.
 
 `POST /api/v1/runs` additionally accepts an optional `format` string
 (backward compatible).
+
+
+### Residual output-loss review (local MVP snagging)
+
+`POST /api/v1/runs/{run_id}/hourly-loss-review` accepts the hourly input
+(`line_technician`, `hour_start`, decimal-string `pallets_produced`) and is read-only.
+It returns `target_packs`, `remaining_gap_packs`, `equivalent_minutes`, and
+`prompt_required`. No idempotency key is needed for this review.
+
+The calculation clips all planned stops and line faults (including faults from
+previous runs) to the hour's applicable run interval and merges them. It values
+that union at the run's preserved management standard, subtracts it from the measured output
+gap, and floors the residual at zero. Equivalent minutes are the residual packs
+divided by that same standard. The unrounded value
+triggers the prompt at 10 minutes; display rounding does not change the threshold.
+This is an estimated output equivalent, not additional recorded downtime.
+
+The tablet reviews before its hourly write. If prompted, the operator can supply
+`other_loss_reason` or explicitly choose Cause unknown, which leaves the reason
+empty. The existing hourly write remains idempotent. A failed review does not
+submit a new reading. Final partial-hour End Run capture uses the same reconciliation. Operating reports are displayed as context and never subtract from the gap.
+
+
+## Casepacker format change and next-run gate
+
+After End Run > Changeover, the technician explicitly chooses whether casepacker work is needed. Yes requires details (customer, pack size, box format/program; max 500 characters). `POST /api/v1/lines/{line}/stoppages` accepts `casepacker_required` and `casepacker_details`; the request is inserted in the same transaction as its line stoppage and QA changeover. Existing clients omitting these optional fields retain the no-request behaviour.
+
+`GET /api/v1/line-stoppages/{id}/casepacker` returns the linked request or null. The timer polls every five seconds and blocks new-run entry while readiness is pending or unknown. After End Changeover it stays on the timer while Engineering is working. Home or stale form attempts are also rejected by the backend; a database trigger protects other start paths. The technician still ends physical changeover normally. Engineering readiness alone does not end the overall changeover timer: the next run ends it using the existing timing model.
+
+Engineering's authenticated `GET /api/v1/engineering/casepacker-requests` lists requests awaiting their next run. `POST /api/v1/engineering/casepacker-requests/{id}/actions` accepts `accept`, `update` or `ready`, a note and an Idempotency-Key. Only the accepting engineer can update or mark ready; the actor comes from the session. Update/ready require notes; readiness has an explicit UI confirmation. Request row locking and persisted idempotency prevent duplicate history/timestamps. The request is not a downtime fault and adds no second interval.
+
+Deployment dependency: apply `migrations/20261002234341_casepacker_readiness.sql` after `0004_fixed_hour_reporting.sql`, before deploying this backend/UI. New tables are backend-only with RLS enabled and no public, anon or authenticated grants. No historical records are changed by the migration. Rehearsed only on synthetic local PostgreSQL. Factory tablet validation remains outstanding.
+
+
+## Line-tech reconnection recovery (2026-10-03)
+
+Network errors and 5xx responses no longer say "nothing was saved". The HMI retains an unconfirmed run action and its original key in localStorage. From the active-run reminder, Check and retry submits the saved action without asking the operator to reconstruct it. Hourly reasons, target-change reasons, stop IDs and End Run readings are retained. Fault reports show their stored details before Retry original report, including retrospective times and the original reporter. No run or stop clock is changed merely by refreshing a screen.
+
+Configuration rehearsal: `scripts/production_config/machine_dropdowns.sql` defaults to Rovema, applies to one named line at a time and remains dry-run by default. It refuses to hide active machines with active preset buttons. An approved preset mapping is still required; this safeguard is not a substitute for reviewing presets already attached to inactive machines.
+
+
+## How SBS fault buttons work
+
+1. Select SBS, then BV1, BV2 or Shared SBS equipment.
+2. Select a section, then a visible preset or Other. Changing equipment clears section and fault; changing section clears the fault.
+3. Choose Resolved (actual stop/restart times and repair details) or Call Engineer.
+4. The existing API receives the real machine ID and preset button ID, plus the selected section in the note. It checks that the button belongs to that machine. No fault is attributed to a bagger just because it belongs to SBS.
+
+`faultSections.ts` groups known paper-sheet reasons for navigation. `rovema_sbs_presets.sql` configures the actual records: eight bagger presets each, three shared presets. It follows `machine_dropdowns.sql`, which now includes the approved shared SBS record. Both scripts stay dry-run by default and have only been rehearsed against synthetic local PostgreSQL. Other configured machines also use visible fault buttons. Legacy machine records are not renamed to infer a hierarchy.
+
+
+## X-ray and Robot palletiser presets - 2026-10-04
+
+`scripts/production_config/rovema_xray_robot_presets.sql` adds the supplied paper-sheet fault presets on Rovema only. X-ray / Checkweigher: Machine jam; CCP check fail. Robot Palletiser: Pallet stacker fault; Pallet outfeed transfer error; Infeed conveyor not moving; Incorrect stacking; Dropping cases; Safety sensor alarm; Pallet position; Wrapper.
+
+Uses the existing visible fault buttons and Other fault reason with required details. Routine test-kit/hourly/end-of-shift checks remain in the planned check workflow, not fault presets. Apply machine_dropdowns.sql first. Dry run by default; explicit commit and named audit actor required. Existing buttons and history are preserved; inactive or differently classified matching presets stop the transaction for review.
+
+Verified with a fresh synthetic PostgreSQL database: 57 checks passed. All ten presets saved through the actual fault-report API against their correct machines; mismatched Casepacker identity was rejected. Dry run rolled back, existing buttons were unchanged and repeat application added no buttons or audit rows. This verifies local configuration and API behavior, not a physical tablet or live deployment. The configuration has not been applied to live or the existing running preview.
+
+
+### Management production standards (local change)
+
+Management owns versioned production speed standards. Changes apply only to new runs from their effective time. Start Run no longer accepts a technician-defined baseline: any legacy speed field is ignored, and the database selects the applicable configuration version. A missing management standard prevents starting a new run. Existing run snapshots and operating-speed reports are unchanged. See `production_standard_reconciliation.md` for configuration matching, API contracts and the required local migration.
+
+
+## Tablet access and task evidence ? current release
+
+HMI routes now require `X-HMI-Session`, obtained from POST `/api/v1/hmi-access/login` with device_name and the server-configured HMI_DEVICE_PIN. The tablet UI handles session expiry and keeps pending submissions. Operator names remain reported identities, not personal authentication. Use one API worker/replica.
+
+POST `/api/v1/task-observations` requires tablet access and Idempotency-Key. The completed-task form covers all seven Rovema tasks independently of operational stop timers. Task evidence is immutable, and incomplete/waiting/shared/legacy evidence is excluded from benchmarking. See deployment_release_gate.md for rollout requirements.
+
+
+## Phone layouts and hourly image sharing
+
+After a confirmed hourly save, Share this hour shows a branded screenshot-ready card and prepares a PNG locally in the browser. It uses the saved response, including exact UK reporting period, hourly pallets, cumulative run pallets including overrun, actual/target packs and output achievement. Output achievement is explicitly not OEE. Reported speed remains context only; no loss calculations change.
+
+Optional share notes support handover/checks/actions. They are labelled as image-only notes, are not written to production history and are cleared on leaving the screen. Fault and quality records must still use their normal workflows. The card does not automatically infer that open faults occurred in the reported hour or invent check outcomes.
+
+Share image opens the device share sheet when PNG file sharing is supported. The technician chooses WhatsApp and the recipient; the app never sends automatically. Otherwise Download PNG and a screenshot-ready card remain available. Export uses browser canvas with no remote rendering service or new dependency. The saved hour is unaffected by export failure or cancelled sharing. Native sharing needs a supporting secure browser context (HTTPS in deployment); see https://developer.mozilla.org/en-US/docs/Web/API/Navigator/share. Actual WhatsApp delivery is a physical-device acceptance check.
+
+Responsive changes cover phone navigation, forms, action buttons, safe-area spacing and contained wide tables. Local Chromium checks: entry screens at 320/390/430 px and synthetic share-card layout at 320/390/430/768 px had no horizontal page overflow. A real PNG was downloaded and visually inspected. This is viewport emulation, not blanket certification of every phone or authenticated screen. Validation: 491 frontend tests, TypeScript, ESLint and production build passed. Existing React test warnings and bundle-size advisory remain. No backend/schema changes or deployment were required.

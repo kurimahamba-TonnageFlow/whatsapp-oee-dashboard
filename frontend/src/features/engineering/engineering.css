@@ -1,24 +1,22 @@
 /*
-  Engineering workspace theme. Deliberately reuses the HMI's dark,
-  high-contrast palette (see frontend/src/features/hmi/hmi.css) so the
-  Engineering area feels like the same working tool as the operator
-  HMI, not a separate light "admin" app. Scoped under .engineering-screen
-  so the rest of the app (Management/Dashboard placeholders) keeps the
-  light Stage-3 foundation theme.
+  Engineering workspace. Every colour, radius and size comes from the
+  shared tokens (src/styles/tokens.css - the management dashboard's
+  palette); this file only sets the breakdown-ready layout: 56px actions,
+  scannable fault cards with solid status fills, a sticky repair form.
 */
 
 .engineering-screen {
-  --eng-bg: #12141a;
-  --eng-surface: #1c1f28;
-  --eng-surface-raised: #262a35;
-  --eng-border: #3a3f4d;
-  --eng-text: #f4f5f7;
-  --eng-text-muted: #a6acbb;
-  --eng-accent: #4c8dff;
-  --eng-success: #33c17a;
-  --eng-warning: #f0ad3d;
-  --eng-danger: #f0554f;
-  --eng-focus: #ffd23f;
+  --eng-bg: var(--pulse-color-bg);
+  --eng-surface: var(--pulse-color-surface);
+  --eng-surface-raised: var(--pulse-color-surface-3);
+  --eng-border: var(--pulse-color-border-strong);
+  --eng-text: var(--pulse-color-text);
+  --eng-text-muted: var(--pulse-color-text-muted);
+  --eng-accent: var(--pulse-color-brand);
+  --eng-success: var(--pulse-color-success);
+  --eng-warning: var(--pulse-color-warning);
+  --eng-danger: var(--pulse-color-danger);
+  --eng-focus: var(--pulse-color-focus);
 
   background: var(--eng-bg);
   color: var(--eng-text);
@@ -37,8 +35,8 @@
 }
 
 .engineering-screen button {
-  min-height: 56px;
-  min-width: 44px;
+  min-height: var(--pulse-touch-target-hmi);
+  min-width: var(--pulse-touch-target-min);
   padding: 0 var(--pulse-space-5);
   border-radius: var(--pulse-radius-md);
   font-size: 1.05rem;
@@ -49,20 +47,26 @@
   cursor: pointer;
 }
 
-.engineering-primary-button {
-  background: var(--eng-accent);
-  border-color: var(--eng-accent);
-  color: #08111f;
+/* Scoped to .engineering-screen so they win over the base button rule
+   above - the primary and danger actions used to render as plain grey. */
+.engineering-screen .engineering-primary-button {
+  background: var(--pulse-color-primary);
+  border-color: var(--pulse-color-brand);
+  color: var(--pulse-color-primary-contrast);
 }
 
-.engineering-secondary-button {
+.engineering-screen .engineering-primary-button:hover:not(:disabled) {
+  background: var(--pulse-color-primary-hover);
+}
+
+.engineering-screen .engineering-secondary-button {
   background: var(--eng-surface-raised);
 }
 
-.engineering-danger-button {
-  background: var(--eng-danger);
-  border-color: var(--eng-danger);
-  color: #1a0403;
+.engineering-screen .engineering-danger-button {
+  background: var(--pulse-fill-bad);
+  border-color: var(--pulse-color-danger);
+  color: #fff;
 }
 
 .engineering-screen button:disabled {
@@ -119,7 +123,10 @@
 }
 
 .engineering-back-link {
-  color: var(--eng-text-muted);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--pulse-touch-target-min);
+  color: var(--pulse-color-text-2);
   text-decoration: none;
   font-weight: 600;
 }
@@ -179,7 +186,7 @@
 }
 
 .engineering-inline-error {
-  background: rgba(240, 85, 79, 0.12);
+  background: var(--pulse-tint-bad);
   border: 1px solid var(--eng-danger);
   border-radius: var(--pulse-radius-md);
   padding: var(--pulse-space-3);
@@ -188,7 +195,7 @@
 
 .engineering-success-note {
   color: var(--eng-success);
-  background: rgba(51, 193, 122, 0.12);
+  background: var(--pulse-tint-good);
   border: 1px solid var(--eng-success);
   border-radius: var(--pulse-radius-md);
   padding: var(--pulse-space-3);
@@ -226,10 +233,21 @@
 
 .engineering-workspace__brand {
   margin: 0;
-  color: var(--eng-text-muted);
+  color: var(--pulse-color-text-2);
   font-size: var(--pulse-font-size-sm);
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+/* The dashboard's brand mark, shared with the app header. */
+.engineering-workspace__brand::before,
+.engineering-login__brand::before {
+  content: '◉';
+  margin-right: 8px;
+  color: var(--pulse-color-brand);
+  font-size: 1.3em;
+  vertical-align: -0.1em;
 }
 
 .engineering-workspace__engineer {
@@ -336,24 +354,31 @@
   font-weight: 600;
 }
 
+/* The dashboard's badges: solid status fills, white text (>= 5.6:1).
+   Waiting for an engineer is the loudest - it is the one to act on. */
 .engineering-status-pill {
-  border-radius: 999px;
+  border-radius: var(--pulse-radius-pill);
   padding: 2px var(--pulse-space-3);
   font-size: var(--pulse-font-size-sm);
   font-weight: 700;
-  background: var(--eng-surface-raised);
+  color: #fff;
+  background: var(--pulse-fill-neutral);
+  white-space: nowrap;
 }
 
 .engineering-status-pill--not-started {
-  color: var(--eng-warning);
+  background: var(--pulse-fill-warn);
 }
 
+/* The class comes from engineering_status ('Ongoing', shown as
+   "Investigating"); --investigating is kept for the old stored value. */
+.engineering-status-pill--ongoing,
 .engineering-status-pill--investigating {
-  color: var(--eng-accent);
+  background: var(--pulse-fill-info);
 }
 
 .engineering-status-pill--resolved {
-  color: var(--eng-success);
+  background: var(--pulse-fill-good);
 }
 
 /* ---------------- Detail panel / dialogs ---------------- */
@@ -426,13 +451,13 @@
 }
 
 .engineering-detail-panel__body::-webkit-scrollbar-track {
-  background: rgba(148, 163, 184, 0.1);
-  border-radius: 999px;
+  background: var(--pulse-color-surface-3);
+  border-radius: var(--pulse-radius-pill);
 }
 
 .engineering-detail-panel__body::-webkit-scrollbar-thumb {
-  background: #64748b;
-  border-radius: 999px;
+  background: var(--pulse-color-border-strong);
+  border-radius: var(--pulse-radius-pill);
   border: 3px solid transparent;
   background-clip: content-box;
 }
@@ -521,3 +546,9 @@
     align-items: flex-start;
   }
 }
+
+.engineering-casepacker-queue { margin: 1rem 0; padding: 1rem; border: 1px solid #64748b; border-radius: 0.75rem; }
+.engineering-casepacker-job { margin-top: 1rem; padding: 1rem; border-top: 1px solid #64748b; }
+.engineering-casepacker-job button { margin: 0.4rem 0.4rem 0.4rem 0; min-height: 44px; }
+.engineering-casepacker-note { display: grid; gap: 0.5rem; }
+.engineering-casepacker-note textarea { min-height: 5rem; font: inherit; padding: 0.6rem; }

@@ -1,5 +1,11 @@
 @import './tokens.css';
 
+/*
+  App-wide base styles and shared components, all from tokens.css. The
+  management dashboards add their own dense layout on top (.pd); the HMI,
+  Engineering workspace and Management area use these directly.
+*/
+
 *,
 *::before,
 *::after {
@@ -22,6 +28,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+h1,
+h2,
+h3 {
+  line-height: 1.25;
+}
+
+a {
+  color: var(--pulse-color-brand);
+}
+
+/* ---------------- Controls (base) ---------------- */
+
 button,
 a,
 input,
@@ -35,10 +53,40 @@ button {
   min-height: var(--pulse-touch-target-min);
   min-width: var(--pulse-touch-target-min);
   padding: 0 var(--pulse-space-4);
-  border-radius: var(--pulse-radius-md);
-  border: 1px solid var(--pulse-color-border);
-  background: var(--pulse-color-surface);
+  border-radius: var(--pulse-radius-sm);
+  border: 1px solid var(--pulse-color-border-strong);
+  background: var(--pulse-color-surface-3);
+  color: var(--pulse-color-text);
   cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--pulse-color-brand);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+input:not([type='radio']):not([type='checkbox']),
+select,
+textarea {
+  min-height: var(--pulse-control-height);
+  padding: 0 var(--pulse-space-3);
+  border: 1px solid var(--pulse-color-border-strong);
+  border-radius: var(--pulse-radius-sm);
+  background: var(--pulse-color-input-bg);
+  color: var(--pulse-color-text);
+}
+
+textarea {
+  padding: var(--pulse-space-3);
+}
+
+input[type='radio'],
+input[type='checkbox'] {
+  accent-color: var(--pulse-color-brand);
 }
 
 /* Visible keyboard focus everywhere - never hover-only */
@@ -52,16 +100,121 @@ textarea:focus-visible,
   outline-offset: 2px;
 }
 
-h1,
-h2,
-h3 {
-  line-height: 1.25;
+/* ---------------- Shared components ---------------- */
+
+/* Buttons: one primary action per view, secondary, and danger. */
+.pulse-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pulse-space-2);
+  font-weight: 600;
+  text-decoration: none;
 }
+
+.pulse-button--primary {
+  background: var(--pulse-color-primary);
+  border-color: var(--pulse-color-brand);
+  color: var(--pulse-color-primary-contrast);
+}
+
+.pulse-button--primary:hover:not(:disabled) {
+  background: var(--pulse-color-primary-hover);
+}
+
+.pulse-button--danger {
+  background: var(--pulse-fill-bad);
+  border-color: var(--pulse-color-danger);
+  color: #fff;
+}
+
+/* Panels: the dashboard card. */
+.pulse-panel {
+  background: var(--pulse-color-surface);
+  border: 1px solid var(--pulse-color-border);
+  border-radius: var(--pulse-radius-lg);
+}
+
+/* Section title with the dashboard's green bar. */
+.pulse-section-title {
+  margin: 0;
+  font-size: var(--pulse-font-size-base);
+  letter-spacing: var(--pulse-heading-tracking);
+  text-transform: uppercase;
+}
+
+.pulse-section-title::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 1em;
+  margin-right: var(--pulse-space-2);
+  vertical-align: -0.12em;
+  background: var(--pulse-color-brand);
+}
+
+/* Badges / pills: solid status fills with white text. */
+.pulse-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 3px 11px;
+  border-radius: var(--pulse-radius-pill);
+  font-size: var(--pulse-font-size-xs);
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--pulse-fill-neutral);
+  color: #fff;
+}
+
+.pulse-badge--good {
+  background: var(--pulse-fill-good);
+}
+
+.pulse-badge--warn {
+  background: var(--pulse-fill-warn);
+}
+
+.pulse-badge--bad {
+  background: var(--pulse-fill-bad);
+}
+
+.pulse-badge--info {
+  background: var(--pulse-fill-info);
+}
+
+/* Notices: a tinted bar with a coloured edge. */
+.pulse-callout {
+  margin: 0;
+  padding: var(--pulse-space-3) var(--pulse-space-4);
+  border-radius: var(--pulse-radius-sm);
+  border-left: 4px solid var(--pulse-color-info);
+  background: var(--pulse-tint-info);
+  color: var(--pulse-color-text);
+}
+
+.pulse-callout--bad {
+  border-left-color: var(--pulse-color-danger);
+  background: var(--pulse-tint-bad);
+}
+
+.pulse-callout--warn {
+  border-left-color: var(--pulse-color-warning);
+  background: var(--pulse-tint-warn);
+}
+
+.pulse-callout--good {
+  border-left-color: var(--pulse-color-success);
+  background: var(--pulse-tint-good);
+}
+
+/* ---------------- App shell (HMI, Management) ---------------- */
 
 .app-shell {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  background: var(--pulse-color-bg);
 }
 
 .app-shell__header {
@@ -70,22 +223,35 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: var(--pulse-space-3);
-  padding: var(--pulse-space-4) var(--pulse-space-5);
+  padding: var(--pulse-space-3) var(--pulse-space-5);
   background: var(--pulse-color-surface);
   border-bottom: 1px solid var(--pulse-color-border);
 }
 
+/* The dashboard's brand mark: green ring, uppercase name. */
 .app-shell__title {
-  font-size: var(--pulse-font-size-lg);
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
+  font-size: var(--pulse-font-size-base);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.app-shell__title::before {
+  content: '◉';
+  color: var(--pulse-color-brand);
+  font-size: 1.4em;
+  line-height: 1;
 }
 
 .app-shell__nav {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--pulse-space-2);
-  padding: var(--pulse-space-3) var(--pulse-space-5);
+  gap: var(--pulse-space-1);
+  padding: 0 var(--pulse-space-5);
   background: var(--pulse-color-surface);
   border-bottom: 1px solid var(--pulse-color-border);
 }
@@ -93,18 +259,26 @@ h3 {
 .app-shell__nav-link {
   display: inline-flex;
   align-items: center;
-  min-height: var(--pulse-touch-target-min);
+  min-height: 48px;
   padding: 0 var(--pulse-space-4);
-  border-radius: var(--pulse-radius-md);
-  color: var(--pulse-color-text);
+  border-bottom: 3px solid transparent;
+  color: var(--pulse-color-text-2);
   text-decoration: none;
   font-weight: 600;
   font-size: var(--pulse-font-size-sm);
 }
 
-.app-shell__nav-link--active {
-  background: var(--pulse-color-primary);
-  color: var(--pulse-color-primary-contrast);
+.app-shell__nav-link:hover {
+  background: var(--pulse-color-hover);
+  color: var(--pulse-color-text);
+}
+
+/* Active: the dashboard's green marker, text stays high-contrast. */
+.app-shell__nav-link--active,
+.app-shell__nav-link--active:hover {
+  border-bottom-color: var(--pulse-color-brand);
+  background: var(--pulse-color-surface-3);
+  color: var(--pulse-color-text);
 }
 
 .app-shell__main {
@@ -129,29 +303,33 @@ h3 {
   align-items: center;
   gap: var(--pulse-space-2);
   font-size: var(--pulse-font-size-sm);
-  color: var(--pulse-color-text-muted);
+  color: var(--pulse-color-text-2);
 }
 
 .api-status__dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: currentColor;
+  background: var(--pulse-color-text-muted);
   flex-shrink: 0;
 }
 
-.api-status--connected {
-  color: var(--pulse-color-success);
+.api-status--connected .api-status__dot {
+  background: var(--pulse-color-success);
 }
 
 .api-status--unavailable {
   color: var(--pulse-color-danger);
 }
 
+.api-status--unavailable .api-status__dot {
+  background: var(--pulse-color-danger);
+}
+
 /* Tablet and up: a little more breathing room */
 @media (min-width: 768px) {
   .app-shell__main {
-    padding: var(--pulse-space-7);
+    padding: var(--pulse-space-6);
   }
 }
 
@@ -163,4 +341,29 @@ h3 {
     padding-left: var(--pulse-space-3);
     padding-right: var(--pulse-space-3);
   }
+
+  .app-shell__nav-link {
+    padding: 0 var(--pulse-space-3);
+  }
+}
+
+/* Phone layouts: retain readable controls and contain wide evidence tables. */
+.app-shell__main, .pd-main, .pulse-panel, .hmi-field, fieldset { min-width: 0; }
+pre { max-width:100%; overflow-x:auto; }
+@media (max-width: 600px) {
+  .app-shell__header { flex-wrap:wrap; gap:12px; }
+  .app-shell__main { padding:12px; padding-bottom:max(24px, env(safe-area-inset-bottom)); }
+  .app-shell__nav { flex-wrap:wrap; gap:8px; }
+  .app-shell__nav-link { flex:1 1 auto; text-align:center; min-height:44px; }
+  input:not([type='radio']):not([type='checkbox']), select, textarea { font-size:16px; max-width:100%; min-width:0; width:100%; }
+  button { white-space:normal; overflow-wrap:anywhere; padding-top:10px; padding-bottom:10px; }
+  .hmi-screen, .engineering-screen, .management-screen { overflow-wrap:anywhere; }
+  .hmi-form-actions, .engineering-confirm-dialog__actions { flex-wrap:wrap; }
+  .hmi-form-actions > button, .engineering-confirm-dialog__actions > button { flex:1 1 100%; }
+  .hmi-form-grid, .hmi-review-list, .hmi-button-grid, .hmi-active-run__actions { grid-template-columns:minmax(0,1fr); }
+  .pulse-comparisons, .pulse-charts { grid-template-columns:minmax(0,1fr); }
+  .engineering-detail-panel__header, .engineering-detail-panel__body { padding:16px; }
+  .engineering-detail-panel { max-height:100dvh; }
+  .pd-filters { grid-template-columns:minmax(0,1fr); }
+  .pd-main { min-width:0; }
 }

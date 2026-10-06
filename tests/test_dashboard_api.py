@@ -194,6 +194,152 @@ def test_runs_filtering_and_pagination(monkeypatch):
     assert captured["offset"] == 10  # (page 2 - 1) * page_size 10
 
 
+def _run_row(**overrides):
+    row = {
+        "run_id": 7,
+        "production_line": "GIC",
+        "line_technician": "Marina",
+        "shift": "Day",
+        "customer": "Asda",
+        "product": "Basmati",
+        "pack_type": "Pillow",
+        "status": "Completed",
+        "started_at": _dt(),
+        "finished_at": _dt(10),
+        "pallets_remaining": 0,
+        "total_pallets_completed": 3,
+        "changeover_type": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_runs_return_per_run_output_from_hourly_updates(monkeypatch):
+    # Stage 6C3: the dashboard's Recent runs table shows each run's
+    # expected / actual / gap straight from the API, never recalculated.
+    row = _run_row(
+        hourly_update_count=2,
+        expected_pallets=4.09,
+        actual_pallets=3.0,
+        expected_tonnes=7.198,
+        actual_tonnes=5.28,
+        output_gap_pallets=1.09,
+        output_gap_tonnes=1.918,
+    )
+    monkeypatch.setattr(dashboard_api, "list_dashboard_runs", lambda f, limit, offset: ([row], 1))
+
+    item = client.get("/api/v1/dashboard/runs").json()["items"][0]
+
+    assert item["hourly_update_count"] == 2
+    assert item["expected_tonnes"] == 7.198
+    assert item["actual_tonnes"] == 5.28
+    assert item["output_gap_tonnes"] == 1.918
+    assert item["expected_pallets"] == 4.09
+    assert item["output_gap_pallets"] == 1.09
+
+
+def test_runs_without_hourly_updates_report_null_output_never_zero(monkeypatch):
+    row = _run_row(
+        hourly_update_count=0,
+        expected_pallets=None,
+        actual_pallets=None,
+        expected_tonnes=None,
+        actual_tonnes=None,
+        output_gap_pallets=None,
+        output_gap_tonnes=None,
+    )
+    monkeypatch.setattr(dashboard_api, "list_dashboard_runs", lambda f, limit, offset: ([row], 1))
+
+    item = client.get("/api/v1/dashboard/runs").json()["items"][0]
+
+    assert item["hourly_update_count"] == 0
+    for key in ("expected_tonnes", "actual_tonnes", "output_gap_tonnes", "output_gap_pallets"):
+        assert item[key] is None
+
+
+def test_runs_rows_without_output_keys_still_validate(monkeypatch):
+    # Additive contract: an older row shape (no output keys) still works.
+    monkeypatch.setattr(dashboard_api, "list_dashboard_runs", lambda f, limit, offset: ([_run_row()], 1))
+
+    response = client.get("/api/v1/dashboard/runs")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["hourly_update_count"] == 0
+    assert item["expected_tonnes"] is None
+
+
+def test_export_columns_are_unchanged_by_per_run_output_fields(monkeypatch):
+    row = _run_row(hourly_update_count=1, expected_tonnes=1.0, actual_tonnes=0.5, output_gap_tonnes=0.5)
+    monkeypatch.setattr(dashboard_api, "list_dashboard_runs", lambda f, limit, offset: ([row], 1))
+
+    response = client.get("/api/v1/dashboard/export")
+
+    assert response.status_code == 200
+    header = response.text.splitlines()[0]
+    assert header == (
+        "run_id,production_line,line_technician,shift,customer,product,pack_type,"
+        "status,started_at,finished_at,pallets_remaining,total_pallets_completed,changeover_type"
+    )
+    assert "expected_tonnes" not in response.text
+
+
+class _CapturingCursor:
+    def __init__(self):
+        self.queries = []
+
+    def execute(self, query, params=None):
+        self.queries.append((query, params))
+
+    def fetchall(self):
+        return []
+
+    def fetchone(self):
+        return (0,)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+class _CapturingConnection:
+    def __init__(self):
+        self.cursor_obj = _CapturingCursor()
+
+    def cursor(self, row_factory=None):
+        return self.cursor_obj
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+def test_list_dashboard_runs_sql_aggregates_each_runs_own_hourly_updates(monkeypatch):
+    connection = _CapturingConnection()
+    monkeypatch.setattr(database, "get_database_connection", lambda: connection)
+
+    database.list_dashboard_runs({"production_line": "GIC", "shift": "Day"}, limit=10, offset=20)
+
+    query, params = connection.cursor_obj.queries[0]
+    assert "LEFT JOIN LATERAL" in query
+    assert "hu.production_run_id = pr.id" in query
+    # Same tonnes formula as the summary and technician-performance reads.
+    assert "hu.expected_pallets * pr.cases_per_pallet * pr.packs_per_case * pr.pack_weight_kg" in query
+    # GREATEST() ignores NULL - the gap must be NULL explicitly, never 0.
+    assert "IS NULL THEN NULL" in query
+    # Filters, test-data exclusion and paging are unchanged.
+    assert database._TEST_DATA_EXCLUSION_SQL in query
+    assert "pr.production_line = %(production_line)s" in query
+    assert "lower(trim(pr.shift)) = ANY(%(shift_aliases)s)" in query
+    assert params["shift_aliases"] == ["am", "day", "days"]
+    assert "ORDER BY pr.started_at DESC" in query
+    assert params["limit"] == 10 and params["offset"] == 20
+
+
 def test_runs_page_size_is_capped_at_maximum(monkeypatch):
     monkeypatch.setattr(
         dashboard_api, "list_dashboard_runs", lambda filters, limit, offset: ([], 0)
@@ -579,3 +725,24 @@ def test_cors_never_configures_a_wildcard_origin():
         allow_origins = options.get("allow_origins")
         if allow_origins is not None:
             assert "*" not in allow_origins
+
+
+def test_filter_options_include_roster_and_historical_technicians(monkeypatch):
+    from src import dashboard_api
+    data = {
+        "production_lines": [], "shifts": [], "products": [], "customers": [],
+        "technicians": ["Liam", "Former technician"], "run_statuses": [],
+        "machines": [], "engineers": ["Kuri", "Former engineer"], "downtime_types": [],
+        "engineering_classes": [], "fault_statuses": [], "unsupported_filters": [],
+    }
+    monkeypatch.setattr(dashboard_api, "get_dashboard_filter_options", lambda: data)
+    result = dashboard_api.dashboard_filter_options()
+    roster = {name for names in dashboard_api.line_technicians_by_line.values() for name in names}
+    assert set(result.technicians) == roster | {"Former technician"}
+    assert result.technicians.count("Liam") == 1
+    assert result.engineers == ["Aaron", "Yago", "Steve", "Dan", "Kuri", "Alfie", "Former engineer"]
+    assert "Thai Hom Mali" in result.products
+    assert len(result.products) == 14
+    assert result.customers == ["Aldi", "ASDA", "Morrisons", "Sainsbury", "Waitrose"]
+    assert result.shifts == ["Days", "Afternoons", "Nights"]
+    assert data["technicians"] == ["Liam", "Former technician"]

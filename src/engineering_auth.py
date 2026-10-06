@@ -51,7 +51,9 @@ def check_pin(pin):
     if not ENGINEERING_PIN:
         return False
 
-    return hmac.compare_digest(pin, ENGINEERING_PIN)
+    # Compared as UTF-8 bytes: compare_digest raises TypeError on a str
+    # with non-ASCII characters, which would turn a wrong PIN into a 500.
+    return hmac.compare_digest(pin.encode("utf-8"), ENGINEERING_PIN.encode("utf-8"))
 
 
 def create_session(engineer_name):

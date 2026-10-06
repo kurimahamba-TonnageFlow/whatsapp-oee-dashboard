@@ -1,9 +1,17 @@
+import { ProductionStandards } from '../features/management/ProductionStandards'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { HmiPage } from '../pages/HmiPage'
 import { EngineeringPage } from '../pages/EngineeringPage'
 import { ManagementPage } from '../pages/ManagementPage'
 import { ManagementPerformancePage } from '../pages/ManagementPerformancePage'
+import { ManagementActiveRunsPage } from '../pages/ManagementActiveRunsPage'
 import { DashboardPage } from '../pages/DashboardPage'
+import { DashboardEngineeringPage } from '../pages/DashboardEngineeringPage'
+import { DashboardQaPage } from '../pages/DashboardQaPage'
+import { DashboardIntelligencePage } from '../pages/DashboardIntelligencePage'
+import { ManagementLayout, ManagementSessionRoot } from '../features/management/ManagementLayout'
+import { RequireManagementSession } from '../features/management/RequireManagementSession'
+import { DashboardLayout } from '../features/dashboard/shell/DashboardLayout'
 
 export function AppRoutes() {
   return (
@@ -11,9 +19,28 @@ export function AppRoutes() {
       <Route path="/" element={<Navigate to="/hmi" replace />} />
       <Route path="/hmi" element={<HmiPage />} />
       <Route path="/engineering" element={<EngineeringPage />} />
-      <Route path="/management" element={<ManagementPage />} />
-      <Route path="/management/performance" element={<ManagementPerformancePage />} />
-      <Route path="/dashboard" element={<DashboardPage />} />
+      {/* One shared Management session for every page below. */}
+      <Route element={<ManagementSessionRoot />}>
+        <Route element={<ManagementLayout />}>
+          <Route path="/management" element={<ManagementPage />} />
+          <Route path="/management/performance" element={<ManagementPerformancePage />} />
+          <Route path="/management/production-standards" element={<RequireManagementSession><ProductionStandards /></RequireManagementSession>} />
+          <Route path="/management/active-runs" element={<ManagementActiveRunsPage />} />
+        </Route>
+        {/* The four management dashboard pages share one dark shell. */}
+        <Route
+          element={
+            <RequireManagementSession>
+              <DashboardLayout />
+            </RequireManagementSession>
+          }
+        >
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/dashboard/engineering" element={<DashboardEngineeringPage />} />
+          <Route path="/dashboard/qa" element={<DashboardQaPage />} />
+          <Route path="/dashboard/operational-intelligence" element={<DashboardIntelligencePage />} />
+        </Route>
+      </Route>
     </Routes>
   )
 }

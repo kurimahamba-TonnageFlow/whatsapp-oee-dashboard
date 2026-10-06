@@ -56,7 +56,7 @@ export function FaultCard({ fault, canAccept, onSelect, onAccept }: FaultCardPro
           <dd>{formatTimestamp(fault.opened_at)}</dd>
         </div>
         <div>
-          <dt>Elapsed</dt>
+          <dt>Production downtime</dt>
           <dd>{formatDuration(fault.duration_minutes)}</dd>
         </div>
         <div>
@@ -70,6 +70,7 @@ export function FaultCard({ fault, canAccept, onSelect, onAccept }: FaultCardPro
           </div>
         )}
       </dl>
+      <p>{fault.production_status === 'Resolved' ? 'Production restored' : 'Production restart not yet confirmed'}</p>
 
       {canAccept && (
         <button

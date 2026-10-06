@@ -29,13 +29,43 @@ Every other `/api/v1/management/*` route requires:
 Authorization: Bearer <token>
 ```
 Missing or invalid/expired token → `401`. Tokens expire after 30
-minutes by default (`MANAGEMENT_SESSION_MINUTES`). Sessions are
-in-memory on the API process - they do not survive a server restart
-and are not shared across multiple worker processes if the API is
-ever run with more than one.
+minutes by default (`MANAGEMENT_SESSION_MINUTES`); nothing extends
+them.
 
 `POST /api/v1/management/logout` (requires a bearer token) revokes it
 immediately.
+
+`GET /api/v1/management/session` (requires a bearer token) confirms a
+token is still live: `200 {"status", "manager_name", "expires_at"}`
+with the expiry set at login, or `401`. It never extends the session.
+
+### Sessions, refresh and restarts
+
+- **Browser refresh keeps the manager signed in.** The React app keeps
+  `{token, managerName, expiresAt}` in the tab's `sessionStorage`
+  (`pulse.management.session.v1`) - never the PIN, never
+  `localStorage`, `IndexedDB` or a cookie. On a refresh the page shows
+  "Checking your Management session…" and calls
+  `GET /api/v1/management/session`; only a `200` restores the session.
+  A `401` (expired, revoked or unknown token) returns to sign-in with
+  "Your Management session has expired"; any other failure returns to
+  sign-in without trusting the stored token. Closing the tab forgets
+  the token; Log Out, a `401` from any call, or leaving the Management
+  area clears it and revokes it server-side.
+- **Sessions and PIN lockouts live in the API process's memory.** An
+  API restart or redeploy signs every manager (and engineer) out; their
+  next request or refresh returns them to sign-in. Lockout counters
+  also reset on restart.
+- **The API must run as exactly one worker process.** With more than
+  one worker (`uvicorn --workers N`, gunicorn with several workers, or
+  several containers behind a load balancer) a token issued by one
+  worker is unknown to the others, so managers are signed out at
+  random and lockouts can be bypassed by landing on another worker.
+  Moving sessions to the database would be needed before scaling out.
+- **Lockout is keyed by the client address the API sees.** Behind a
+  reverse proxy that is the proxy's address unless uvicorn is started
+  with `--proxy-headers --forwarded-allow-ips=<proxy address>`; without
+  that, one person's wrong PINs lock every manager out for 15 minutes.
 
 ## Line / machine / button configuration
 
@@ -81,7 +111,14 @@ GET /api/v1/management/active-runs
 ```
 Returns every currently `Active` run across all three lines (including
 any `TEST-` marked ones - Management must be able to see and close
-those too), each with an `active_seconds` field.
+those too), each with `active_seconds`, `last_hourly_update_at`,
+`hourly_update_count`, `open_planned_stop_reason` /
+`open_planned_stop_started_at`, `open_changeover_id` and
+`open_line_fault_count` (faults open on the line from any run).
+
+The Management **Active runs** page (`/management/active-runs`) lists
+these and force-closes a run only after a reason (and a note for
+Other) and a confirmation step that states the consequences below.
 
 ```
 POST /api/v1/management/runs/{run_id}/force-close
@@ -97,18 +134,40 @@ browser closed`, `Run started by mistake`, `Changeover completed`,
   force-closed it a moment earlier - both look identical to the
   caller, which is the correct behaviour: someone else already
   resolved it).
-- `200` — `{"status":"success","run_id","production_line","run_status":"Cancelled","closed_by","reason"}`.
+- `409` — a changeover is open on the run. It must be completed on the
+  line tablet (Changeover Complete) first; a changeover has no
+  truthful "abandoned" state.
+- `200` — `{"status":"success","run_id","production_line","run_status":"Cancelled","finished_at","closed_by","reason","ended_planned_stop"}`.
 
 Force-closed runs get `status = 'Cancelled'` (an existing, previously
 unused value already permitted by the database's own check
 constraint) and `finished_at` set to the close time - never
 `'Completed'`, so they stay distinguishable from a normally-finished
 run in all dashboard/reporting queries. History is preserved; nothing
-is deleted. The line becomes available again immediately (the same
-partial unique index that limits a line to one `Active` run also makes
-this close atomic and concurrency-safe - a second manager's
-force-close attempt on the same run gets `409`, not a silent
-double-close).
+is deleted. The close is one transaction with the run row locked, so a
+second manager's force-close attempt on the same run gets `409`, not a
+silent double-close.
+
+What a force-close does and does not do:
+
+- **No output is invented.** No hourly rows are written; hours nobody
+  reported stay "no reading" in the hourly report.
+- **An open planned stop is ended at the close time** (`ended_by` =
+  "<manager> (manager force-close)"), as End Run would require - left
+  open it would keep counting with no run behind it.
+- **Open faults are untouched.** They belong to the line, stay open for
+  Engineering, and the next technician must acknowledge them before
+  starting a run.
+- **The line then needs its next step** (End Shift, Changeover, Other or
+  Not scheduled), recorded by the next technician on the tablet or by a
+  manager on the Production dashboard ("Run ended — next step not
+  chosen"). It starts at the force-close time. Start Run is refused
+  until then.
+- **Audit:** one `management_audit_log` row (`force_close_run`) with the
+  manager, reason, the run before, and the run after including any
+  planned stop it ended. The audit write happens after the close
+  commits and a failure there is logged, not raised - the run is
+  still closed.
 
 ## Technician performance
 
@@ -193,3 +252,28 @@ overrides `MANAGEMENT_SESSION_MINUTES`, `MANAGEMENT_LOGIN_MAX_ATTEMPTS`,
 It has **not** been applied to the live database yet - review it, then
 apply it (e.g. via Supabase's migration tooling) before any of the
 config endpoints above will work against real data.
+
+
+### Management production standards (local change)
+
+Management owns versioned production speed standards. Changes apply only to new runs from their effective time. Start Run no longer accepts a technician-defined baseline: any legacy speed field is ignored, and the database selects the applicable configuration version. A missing management standard prevents starting a new run. Existing run snapshots and operating-speed reports are unchanged. See `production_standard_reconciliation.md` for configuration matching, API contracts and the required local migration.
+
+
+## Management snag corrections ? 2026-10-05 (local)
+
+This section supersedes the earlier technician-performance calculation and force-close audit descriptions. Performance selects complete runs by their London start date and includes each selected run in full. `technician_reports.build_technician_performance` uses the shared fixed-standard reconciliation. Achievement uses comparable nominal tonnes, not a sum of unlike pallet formats. Gaps sum positive period shortfalls. `reported_tonnes` retains known actual output even where a historical standard or reading interval is unknown. `coverage_complete` and `limitations` describe comparability; incomplete evidence is unranked. `data_completion_rate_percent` measures timed comparable reading coverage of run duration, not simply the percentage of runs containing any reading.
+
+Planned and line-wide unplanned stop intervals are clipped and unioned per run, with planned precedence. Faults carried from earlier runs are included; production restart ends downtime regardless of Engineering closure. Between-run stops are not assigned to a run technician. This is production evidence, not competence or individual responsibility.
+
+Force-close now inserts the manager, reason and locked before/after snapshot in the closure transaction. Audit failure rolls back the entire action. Factory setup and weekly-target configuration API audits also commit in the same transaction. Update snapshots are read under a row lock; weekly-target batches hold a transaction-scoped advisory lock by week, including first creation. Audit failure rolls back the change. No schema migration is required for this correction.
+
+
+## Rovema task-performance evidence (2026-10-06)
+
+Performance now includes a management-session-protected, read-only matrix at GET /api/v1/management/task-performance. It covers the seven agreed tasks and the full Rovema roster. Scope is a separate rolling 90-day task-start window, not the production-run filters. Existing timestamped planned stops are reused; exact task labels and CCP Check are recognised. Unknown reasons are disclosed as excluded. Cancelled and configured test runs are excluded.
+
+All cells remain grey until reference times, minimum samples and colour thresholds are agreed. No worker competence, fault responsibility or automatic speed ranking is inferred. The timer initiator is the reporting identity, not a verified performer. Details preserve start/end actors and times, including unfinished records, and median completed elapsed times grouped by product and pack configuration. Waiting and shared work are not separated in existing evidence. Casepacker requests, breakdowns and between-run changeovers are not reassigned as technician task durations.
+
+This is the agreed evidence-gathering first stage. Dedicated task/performer/delay capture, approved comparison rules, trend evaluation and automatic colours remain future work. No migration or manual rating editor is introduced.
+
+User confirmed evidence collection first: a separate benchmarking tracker displays fastest, median and slowest completed timer observations and sample counts per reporter/task/product/pack configuration. These observations do not set targets or colours. Benchmark definitions will be reviewed later.

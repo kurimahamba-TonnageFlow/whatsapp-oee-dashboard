@@ -4,6 +4,8 @@
  * the whole shape. Never imported by application code.
  */
 import type {
+  RunHour,
+  RunHours,
   Changeover,
   HmiLineState,
   HmiLineStateResponse,
@@ -115,6 +117,48 @@ export function changeover(overrides: Partial<Changeover> = {}): Changeover {
   }
 }
 
+function hour(start: string, end: string, label: string, status: RunHour['status'], extra: Partial<RunHour> = {}): RunHour {
+  return {
+    hour_start: start,
+    hour_end: end,
+    hour_label: label,
+    status,
+    pallets_produced: status === 'reported' ? 1.75 : null,
+    applicable_minutes: 60,
+    is_partial_hour: false,
+    ...extra,
+  }
+}
+
+/** Run started 06:05: 06:00 (partial) and 07:00 reported, 08:00 in progress. */
+export const HOURS_NONE_DUE: RunHours = {
+  hours: [
+    hour('2026-01-12T06:00:00+00:00', '2026-01-12T07:00:00+00:00', '06:00–07:00', 'reported', {
+      applicable_minutes: 55,
+      is_partial_hour: true,
+    }),
+    hour('2026-01-12T07:00:00+00:00', '2026-01-12T08:00:00+00:00', '07:00–08:00', 'reported'),
+    hour('2026-01-12T08:00:00+00:00', '2026-01-12T09:00:00+00:00', '08:00–09:00', 'in_progress', {
+      applicable_minutes: 5,
+    }),
+  ],
+  due_count: 0,
+  next_due_hour: null,
+  current_hour: hour('2026-01-12T08:00:00+00:00', '2026-01-12T09:00:00+00:00', '08:00–09:00', 'in_progress', {
+    applicable_minutes: 5,
+  }),
+}
+
+/** The same run with 07:00–08:00 still to report. */
+export const HOURS_ONE_DUE: RunHours = {
+  ...HOURS_NONE_DUE,
+  hours: HOURS_NONE_DUE.hours.map((item) =>
+    item.hour_label === '07:00–08:00' ? { ...item, status: 'due', pallets_produced: null } : item,
+  ),
+  due_count: 1,
+  next_due_hour: { ...HOURS_NONE_DUE.hours[1], status: 'due', pallets_produced: null },
+}
+
 export function runState(overrides: Partial<RunState> = {}): RunState {
   return {
     // Overridable: screens add the time elapsed since generated_at to
@@ -164,6 +208,9 @@ export function runState(overrides: Partial<RunState> = {}): RunState {
     },
     open_planned_downtime: overrides.open_planned_downtime ?? null,
     open_changeover: overrides.open_changeover ?? null,
+    hours: overrides.hours ?? HOURS_NONE_DUE,
+    line_faults: overrides.line_faults ?? [],
+    target_speed_changes: overrides.target_speed_changes ?? [],
   }
 }
 

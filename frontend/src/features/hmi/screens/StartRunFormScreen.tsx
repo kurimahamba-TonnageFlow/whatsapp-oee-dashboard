@@ -1,3 +1,4 @@
+import { StandardPreview } from '../components/StandardPreview'
 import type { FormEvent } from 'react'
 import { CUSTOMERS, LINE_TECHNICIANS, PRODUCTS, SHIFTS } from '../constants'
 import { FieldError } from '../components/FieldError'
@@ -11,6 +12,8 @@ interface StartRunFormScreenProps {
   onBack: () => void
   onClear: () => void
   onReview: () => void
+  /** A handover / changeover still timing on the line until this run starts. */
+  timerNotice?: string | null
 }
 
 export function StartRunFormScreen({
@@ -20,6 +23,7 @@ export function StartRunFormScreen({
   onBack,
   onClear,
   onReview,
+  timerNotice = null,
 }: StartRunFormScreenProps) {
   function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -29,6 +33,11 @@ export function StartRunFormScreen({
   return (
     <div className="hmi-screen hmi-start-run-form">
       <h1>Start Run — {values.productionLine}</h1>
+      {timerNotice && (
+        <p className="hmi-timer-notice" role="status">
+          ⏱ {timerNotice}
+        </p>
+      )}
 
       <form onSubmit={handleSubmit} noValidate>
         <div className="hmi-form-grid">
@@ -131,17 +140,8 @@ export function StartRunFormScreen({
             <FieldError message={errors.packType} />
           </label>
 
-          <label className="hmi-field">
-            Target speed (packs/min)
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.1"
-              value={values.targetSpeedPpm}
-              onChange={(e) => onChange('targetSpeedPpm', e.target.value)}
-            />
-            <FieldError message={errors.targetSpeedPpm} />
-          </label>
+          <StandardPreview values={values} />
+          <p className="hmi-field-help">Management sets the production standard for this configuration. Start Run selects the version effective at its start; it stays fixed for the run. Machine-speed reports provide context only.</p>
 
           <label className="hmi-field">
             Cases per pallet

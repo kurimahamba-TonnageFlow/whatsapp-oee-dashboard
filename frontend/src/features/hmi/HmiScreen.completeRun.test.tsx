@@ -112,7 +112,7 @@ async function openCompleteRun() {
   )
 
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Rovema' })).toBeInTheDocument())
-  fireEvent.click(screen.getByRole('button', { name: /complete run/i }))
+  fireEvent.click(screen.getByRole('button', { name: /^end run$/i }))
 }
 
 function answerNoFinalProduction() {
@@ -124,11 +124,11 @@ describe('Complete Run', () => {
     await openCompleteRun()
 
     expect(
-      screen.getByText(/has any production been made since the last saved hourly update/i),
+      screen.getByText(/has any production been made since 08:00 \(the final part hour\)/i),
     ).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: 'Yes' })).not.toBeChecked()
     expect(screen.getByRole('radio', { name: 'No' })).not.toBeChecked()
-    expect(screen.queryByLabelText(/final pallets produced/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/pallets produced in the final part hour/i)).not.toBeInTheDocument()
   })
 
   it('will not review until the question is answered', async () => {
@@ -154,7 +154,7 @@ describe('Complete Run', () => {
     fireEvent.click(screen.getByRole('button', { name: /review/i }))
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /complete run — review/i })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /end run — review/i })).toBeInTheDocument(),
     )
     expect(vi.mocked(hmiApi.previewCompletion).mock.calls[0][1]).toEqual({
       line_technician: 'Liam',
@@ -165,8 +165,8 @@ describe('Complete Run', () => {
       unavailable_reason: null,
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /confirm complete run/i }))
-    await waitFor(() => expect(screen.getByText('✓ RUN COMPLETED')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /confirm end run/i }))
+    await waitFor(() => expect(screen.getByText('✓ Run ended')).toBeInTheDocument())
   })
 
   it('sends decimal final production as an exact string', async () => {
@@ -174,7 +174,7 @@ describe('Complete Run', () => {
     await openCompleteRun()
 
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }))
-    fireEvent.change(screen.getByLabelText(/final pallets produced/i), {
+    fireEvent.change(screen.getByLabelText(/pallets produced in the final part hour/i), {
       target: { value: '1.25' },
     })
     fireEvent.change(screen.getByLabelText(/x-ray pack count/i), { target: { value: '18000' } })
@@ -188,7 +188,7 @@ describe('Complete Run', () => {
     await openCompleteRun()
 
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }))
-    fireEvent.change(screen.getByLabelText(/final pallets produced/i), { target: { value } })
+    fireEvent.change(screen.getByLabelText(/pallets produced in the final part hour/i), { target: { value } })
     fireEvent.change(screen.getByLabelText(/x-ray pack count/i), { target: { value: '18000' } })
     fireEvent.click(screen.getByRole('button', { name: /review/i }))
 
@@ -243,7 +243,7 @@ describe('Complete Run', () => {
     fireEvent.click(screen.getByRole('button', { name: /review/i }))
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /complete run — review/i })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /end run — review/i })).toBeInTheDocument(),
     )
     expect(screen.getByText('Count unavailable')).toBeInTheDocument()
     expect(screen.getByText(/no waste figure is calculated/i)).toBeInTheDocument()
@@ -263,7 +263,7 @@ describe('Complete Run', () => {
     fireEvent.click(screen.getByRole('button', { name: /review/i }))
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /complete run — review/i })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /end run — review/i })).toBeInTheDocument(),
     )
     expect(screen.getByText('11.75')).toBeInTheDocument()
     expect(screen.getByText('17600')).toBeInTheDocument()
@@ -317,10 +317,10 @@ describe('Complete Run', () => {
     fireEvent.change(screen.getByLabelText(/x-ray pack count/i), { target: { value: '18000' } })
     fireEvent.click(screen.getByRole('button', { name: /review/i }))
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /complete run — review/i })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /end run — review/i })).toBeInTheDocument(),
     )
 
-    const confirm = screen.getByRole('button', { name: /confirm complete run/i })
+    const confirm = screen.getByRole('button', { name: /confirm end run/i })
     fireEvent.click(confirm)
     fireEvent.click(confirm)
 
@@ -340,14 +340,14 @@ describe('Complete Run', () => {
     fireEvent.change(screen.getByLabelText(/x-ray pack count/i), { target: { value: '18000' } })
     fireEvent.click(screen.getByRole('button', { name: /review/i }))
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /complete run — review/i })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /end run — review/i })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /confirm complete run/i }))
+    fireEvent.click(screen.getByRole('button', { name: /confirm end run/i }))
 
-    await waitFor(() => expect(screen.getByText(/nothing was saved/i)).toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: /complete run — review/i })).toBeInTheDocument()
-    expect(screen.queryByText('✓ RUN COMPLETED')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/may already have saved/i)).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: /end run — review/i })).toBeInTheDocument()
+    expect(screen.queryByText('✓ Run ended')).not.toBeInTheDocument()
     expect(window.localStorage.getItem('pulse.hmi.activeRun.v2')).not.toBeNull()
   })
 
@@ -360,12 +360,12 @@ describe('Complete Run', () => {
     fireEvent.change(screen.getByLabelText(/x-ray pack count/i), { target: { value: '18000' } })
     fireEvent.click(screen.getByRole('button', { name: /review/i }))
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /complete run — review/i })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /end run — review/i })).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /confirm complete run/i }))
+    fireEvent.click(screen.getByRole('button', { name: /confirm end run/i }))
 
-    await waitFor(() => expect(screen.getByText('✓ RUN COMPLETED')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('✓ Run ended')).toBeInTheDocument())
     const [runId, payload, key] = vi.mocked(hmiApi.completeRun).mock.calls[0]
     expect(runId).toBe(99)
     expect(payload.xray_pack_count).toBe(18000)
@@ -385,14 +385,14 @@ describe('Complete Run', () => {
     fireEvent.change(screen.getByLabelText(/x-ray pack count/i), { target: { value: xray } })
     fireEvent.click(screen.getByRole('button', { name: /review/i }))
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /complete run — review/i })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /end run — review/i })).toBeInTheDocument(),
     )
   }
 
   it('refuses to complete when the X-ray count is below the palletised packs', async () => {
     await reviewWith(inconsistentPreview())
 
-    expect(screen.getByRole('button', { name: /confirm complete run/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /confirm end run/i })).toBeDisabled()
     expect(screen.getByText(/the run cannot be completed with these figures/i)).toBeInTheDocument()
     expect(hmiApi.completeRun).not.toHaveBeenCalled()
   })
@@ -428,7 +428,7 @@ describe('Complete Run', () => {
   it('allows completion once the figures are consistent', async () => {
     await reviewWith(preview(), '18000')
 
-    expect(screen.getByRole('button', { name: /confirm complete run/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /confirm end run/i })).toBeEnabled()
     expect(screen.queryByText(/cannot be completed with these figures/i)).not.toBeInTheDocument()
   })
 
@@ -439,4 +439,19 @@ describe('Complete Run', () => {
     expect(screen.getByText('400')).toBeInTheDocument()
     expect(screen.getByText('2.2%')).toBeInTheDocument()
   })
+})
+
+
+it.each(['', 'unknown'])('final gap review permits closure with explanation %j and retains server evidence', async note => {
+  vi.mocked(hmiApi.previewCompletion).mockResolvedValue(preview({loss_review:{remaining_gap_packs:1000,equivalent_minutes:10,prompt_required:true,limitations:[]}}))
+  vi.mocked(hmiApi.completeRun).mockResolvedValue(completeResponse())
+  await openCompleteRun()
+  answerNoFinalProduction()
+  fireEvent.change(screen.getByLabelText(/x-ray pack count/i),{target:{value:'18000'}})
+  fireEvent.click(screen.getByRole('button',{name:/review/i}))
+  await screen.findByText(/Remaining production gap: 1000/)
+  if (note) fireEvent.change(screen.getByLabelText(/Reported explanation/),{target:{value:note}})
+  fireEvent.click(screen.getByRole('button',{name:/confirm end run/i}))
+  await waitFor(() => expect(hmiApi.completeRun).toHaveBeenCalled())
+  expect(vi.mocked(hmiApi.completeRun).mock.calls[0][1].other_loss_reason).toBe(note || undefined)
 })

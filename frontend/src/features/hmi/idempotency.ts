@@ -22,6 +22,7 @@ export type PendingActionKind =
   | 'changeoverStart'
   | 'changeoverComplete'
   | 'completeRun'
+  | 'targetSpeed'
 
 export interface PendingAction {
   kind: PendingActionKind

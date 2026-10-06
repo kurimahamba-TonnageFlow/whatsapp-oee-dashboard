@@ -55,12 +55,81 @@ async function openReportScreen() {
 }
 
 describe('Report to Engineer', () => {
+  it('restores an unconfirmed technician-resolved report after reload and retries the exact payload', async () => {
+    const original = {
+      reported_by: 'Ben', machine: 'BV1', machine_id: 10, button_id: 20,
+      reason: 'Film Jam', note: 'Removed trapped film', outcome: 'resolved',
+      started_at: '2026-01-12T07:10:00.000Z', restored_at: '2026-01-12T07:15:00.000Z',
+    }
+    window.localStorage.setItem('pulse.hmi.pendingAction.v1', JSON.stringify({
+      kind: 'faultReport', key: 'reload-fault-key-000001', runId: 99,
+      label: 'Reporting Film Jam on BV1', payload: original, createdAtIso: '2026-01-12T07:16:00Z',
+    }))
+    vi.mocked(hmiApi.reportFault).mockResolvedValue(faultResponse({ production_status: 'Resolved' }))
+    await openReportScreen()
+    expect(screen.getByRole('heading', { name: 'Confirm previous fault report' })).toBeInTheDocument()
+    expect(screen.getByText(/Removed trapped film/)).toBeInTheDocument()
+    expect(hmiApi.reportFault).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry original report' }))
+    await waitFor(() => expect(hmiApi.reportFault).toHaveBeenCalledWith(99, original, 'reload-fault-key-000001'))
+    await waitFor(() => expect(window.localStorage.getItem('pulse.hmi.pendingAction.v1')).toBeNull())
+  })
+
+  it('records a technician-resolved stop with actual times and repair details', async () => {
+    vi.mocked(hmiApi.reportFault).mockResolvedValue(faultResponse({ production_status: 'Resolved' }))
+    await openReportScreen()
+    fireEvent.click(screen.getByRole('button', { name: 'Resolved' }))
+    fireEvent.click(screen.getByRole('button', { name: 'BV1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Film Jam' }))
+    fireEvent.change(screen.getByLabelText(/stop started/i), { target: { value: '2026-01-12T07:10' } })
+    fireEvent.change(screen.getByLabelText(/production restarted/i), { target: { value: '2026-01-12T07:15' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save resolved downtime' }))
+    expect(hmiApi.reportFault).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText(/note \(required\)/i), { target: { value: 'Removed trapped film and restarted' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save resolved downtime' }))
+    await screen.findByText('✓ Resolved downtime recorded')
+    expect(vi.mocked(hmiApi.reportFault).mock.calls[0][1]).toMatchObject({
+      outcome: 'resolved', started_at: new Date('2026-01-12T07:10').toISOString(),
+      restored_at: new Date('2026-01-12T07:15').toISOString(), note: 'Removed trapped film and restarted',
+    })
+  })
+  it('reports an unlisted machine with details and no configured IDs', async () => {
+    vi.mocked(hmiApi.reportFault).mockResolvedValue(faultResponse())
+    await openReportScreen()
+    fireEvent.click(screen.getByRole('button', { name: 'Other machine / section' }))
+    fireEvent.change(screen.getByLabelText(/name the machine/i), { target: { value: 'Transfer conveyor' } })
+    fireEvent.change(screen.getByLabelText(/fault reason/i), { target: { value: 'Belt stopped' } })
+    fireEvent.change(screen.getByLabelText(/note \(required\)/i), { target: { value: 'Motor runs but the belt does not move' } })
+    fireEvent.click(screen.getByRole('button', { name: /^report to engineer$/i }))
+    await waitFor(() => expect(hmiApi.reportFault).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(hmiApi.reportFault).mock.calls[0][1]).toMatchObject({
+      machine: 'Transfer conveyor', machine_id: null, button_id: null, reason: 'Belt stopped',
+    })
+  })
+
+  it('allows an unlisted reason on a configured machine but requires details', async () => {
+    vi.mocked(hmiApi.reportFault).mockResolvedValue(faultResponse())
+    await openReportScreen()
+    fireEvent.click(screen.getByRole('button', { name: 'BV1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Other fault reason' }))
+    fireEvent.change(screen.getByLabelText(/describe the fault/i), { target: { value: 'Seal temperature unstable' } })
+    fireEvent.click(screen.getByRole('button', { name: /^report to engineer$/i }))
+    expect(hmiApi.reportFault).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/add a note/i)
+    fireEvent.change(screen.getByLabelText(/note \(required\)/i), { target: { value: 'Temperature drops between cycles' } })
+    fireEvent.click(screen.getByRole('button', { name: /^report to engineer$/i }))
+    await waitFor(() => expect(hmiApi.reportFault).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(hmiApi.reportFault).mock.calls[0][1]).toMatchObject({
+      machine: 'BV1', machine_id: 10, button_id: null, reason: 'Seal temperature unstable',
+    })
+  })
+
   it('sends the configured machine and fault button', async () => {
     vi.mocked(hmiApi.reportFault).mockResolvedValue(faultResponse())
     await openReportScreen()
 
-    fireEvent.change(screen.getByLabelText(/machine or section/i), { target: { value: 'BV1' } })
-    fireEvent.change(screen.getByLabelText(/fault reason/i), { target: { value: '20' } })
+    fireEvent.click(screen.getByRole('button', { name: 'BV1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Film Jam' }))
     fireEvent.click(screen.getByRole('button', { name: /^report to engineer$/i }))
 
     await waitFor(() => expect(screen.getByText('✓ Reported to Engineering')).toBeInTheDocument())
@@ -86,9 +155,7 @@ describe('Report to Engineer', () => {
     vi.mocked(hmiApi.reportFault).mockResolvedValue(faultResponse({ machine: 'Casepacker' }))
     await openReportScreen()
 
-    fireEvent.change(screen.getByLabelText(/machine or section/i), {
-      target: { value: 'Casepacker' },
-    })
+    fireEvent.click(screen.getByRole('button', { name: 'Casepacker' }))
     fireEvent.change(screen.getByLabelText(/fault reason/i), { target: { value: 'Blockage' } })
     fireEvent.click(screen.getByRole('button', { name: /^report to engineer$/i }))
 
@@ -122,8 +189,8 @@ describe('Report to Engineer', () => {
     )
     await openReportScreen()
 
-    fireEvent.change(screen.getByLabelText(/machine or section/i), { target: { value: 'BV1' } })
-    fireEvent.change(screen.getByLabelText(/fault reason/i), { target: { value: '20' } })
+    fireEvent.click(screen.getByRole('button', { name: 'BV1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Film Jam' }))
     const button = screen.getByRole('button', { name: /^report to engineer$/i })
     fireEvent.click(button)
     fireEvent.click(button)
@@ -140,15 +207,15 @@ describe('Report to Engineer', () => {
     vi.mocked(hmiApi.reportFault).mockRejectedValueOnce(new ApiRequestError(503, 'down'))
     await openReportScreen()
 
-    fireEvent.change(screen.getByLabelText(/machine or section/i), { target: { value: 'BV1' } })
-    fireEvent.change(screen.getByLabelText(/fault reason/i), { target: { value: '20' } })
+    fireEvent.click(screen.getByRole('button', { name: 'BV1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Film Jam' }))
     fireEvent.click(screen.getByRole('button', { name: /^report to engineer$/i }))
 
-    await waitFor(() => expect(screen.getByText(/nothing was saved/i)).toBeInTheDocument())
-    expect(screen.getByLabelText(/machine or section/i)).toHaveValue('BV1')
+    await waitFor(() => expect(screen.getByText(/may already have saved/i)).toBeInTheDocument())
+    expect(screen.getByText(/BV1/)).toBeInTheDocument()
 
     vi.mocked(hmiApi.reportFault).mockResolvedValueOnce(faultResponse())
-    fireEvent.click(screen.getByRole('button', { name: /^report to engineer$/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry original report' }))
 
     await waitFor(() => expect(screen.getByText('✓ Reported to Engineering')).toBeInTheDocument())
     const calls = vi.mocked(hmiApi.reportFault).mock.calls
@@ -160,8 +227,8 @@ describe('Report to Engineer', () => {
     vi.mocked(hmiApi.reportFault).mockResolvedValue(faultResponse())
     await openReportScreen()
 
-    fireEvent.change(screen.getByLabelText(/machine or section/i), { target: { value: 'BV1' } })
-    fireEvent.change(screen.getByLabelText(/fault reason/i), { target: { value: '20' } })
+    fireEvent.click(screen.getByRole('button', { name: 'BV1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Film Jam' }))
     fireEvent.click(screen.getByRole('button', { name: /^report to engineer$/i }))
 
     await waitFor(() => expect(screen.getByText('✓ Reported to Engineering')).toBeInTheDocument())
@@ -176,8 +243,8 @@ describe('Report to Engineer', () => {
     )
     await openReportScreen()
 
-    fireEvent.change(screen.getByLabelText(/machine or section/i), { target: { value: 'BV1' } })
-    fireEvent.change(screen.getByLabelText(/fault reason/i), { target: { value: '20' } })
+    fireEvent.click(screen.getByRole('button', { name: 'BV1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Film Jam' }))
     fireEvent.click(screen.getByRole('button', { name: /^report to engineer$/i }))
 
     await waitFor(() =>

@@ -1,10 +1,12 @@
-import { AppShell } from '../layouts/AppShell'
-import { PerformancePlaceholder } from '../features/management/PerformancePlaceholder'
+import { RequireManagementSession } from '../features/management/RequireManagementSession'
+import { TechnicianPerformance } from '../features/performance/TechnicianPerformance'
 
+/** /management/performance - requires a Management session. Rendered
+ * inside ManagementLayout (AppShell + shared session). */
 export function ManagementPerformancePage() {
   return (
-    <AppShell>
-      <PerformancePlaceholder />
-    </AppShell>
+    <RequireManagementSession>
+      <TechnicianPerformance />
+    </RequireManagementSession>
   )
 }
