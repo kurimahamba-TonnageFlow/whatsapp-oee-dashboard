@@ -1,0 +1,15 @@
+**
+!requirements.txt
+!src/
+!src/**
+!frontend/
+!frontend/**
+!deploy/
+!deploy/**
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.*
+frontend/node_modules
+frontend/dist
+frontend/design-reference

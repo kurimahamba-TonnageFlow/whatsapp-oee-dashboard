@@ -1,0 +1,41 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: deploy/api.Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in Dokploy Environment}
+      MANAGEMENT_PIN: ${MANAGEMENT_PIN:?Set MANAGEMENT_PIN}
+      ENGINEERING_PIN: ${ENGINEERING_PIN:?Set ENGINEERING_PIN}
+      HMI_DEVICE_PIN: ${HMI_DEVICE_PIN:?Set HMI_DEVICE_PIN}
+      HMI_ORIGIN: ${PULSE_ORIGIN:?Set PULSE_ORIGIN to your HTTPS origin}
+      DASHBOARD_ORIGIN: ${PULSE_ORIGIN:?Set PULSE_ORIGIN to your HTTPS origin}
+      MANAGEMENT_SESSION_MINUTES: ${MANAGEMENT_SESSION_MINUTES:-30}
+      ENGINEERING_SESSION_MINUTES: ${ENGINEERING_SESSION_MINUTES:-30}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+      WHATSAPP_ALLOWED_GROUP: ${WHATSAPP_ALLOWED_GROUP:-}
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=8)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/web.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
