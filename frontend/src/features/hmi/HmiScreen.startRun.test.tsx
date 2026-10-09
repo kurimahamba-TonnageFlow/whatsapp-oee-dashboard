@@ -50,9 +50,7 @@ function fillValidForm() {
   fireEvent.change(screen.getByLabelText(/^shift/i), { target: { value: 'Days' } })
   fireEvent.change(screen.getByLabelText(/^customer/i), { target: { value: 'ASDA' } })
   fireEvent.change(screen.getByLabelText(/^product/i), { target: { value: 'White Basmati' } })
-  fireEvent.change(screen.getByLabelText(/pack weight label/i), { target: { value: '1kg' } })
-  fireEvent.change(screen.getByLabelText(/pack weight \(kg\)/i), { target: { value: '1' } })
-  fireEvent.change(screen.getByLabelText(/packs per case/i), { target: { value: '8' } })
+  fireEvent.change(screen.getByLabelText(/^pack weight/i), { target: { value: '1kg' } })
   fireEvent.change(screen.getByLabelText(/^format/i), { target: { value: '1 kg × 8' } })
   fireEvent.change(screen.getByLabelText(/cases per pallet/i), { target: { value: '220' } })
   fireEvent.change(screen.getByLabelText(/pallets remaining/i), { target: { value: '38' } })
@@ -60,7 +58,7 @@ function fillValidForm() {
 }
 
 describe('HmiScreen Start Run form', () => {
-  it.each([/packs per case/i, /cases per pallet/i, /pallets remaining/i, /previous run completed/i])(
+  it.each([ /cases per pallet/i, /pallets remaining/i, /previous run completed/i])(
     'keeps fractional count %s on the form with a field error', async (label) => {
       await openStartRunForm()
       fillValidForm()
@@ -139,23 +137,22 @@ describe('HmiScreen Start Run form', () => {
   it('shows numeric validation for non-positive values', async () => {
     await openStartRunForm()
     fillValidForm()
-    fireEvent.change(screen.getByLabelText(/pack weight \(kg\)/i), { target: { value: '0' } })
+    fireEvent.change(screen.getByLabelText(/^pack weight/i), {target:{value:'0kg'}})
 
     fireEvent.click(screen.getByRole('button', { name: /review run/i }))
 
-    expect(screen.getAllByText(/pack weight \(kg\) greater than 0/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/not a recognised pack weight/i).length).toBeGreaterThan(0)
   })
 
   it('blocks Review Run when the pack weight label and kg value do not match', async () => {
     await openStartRunForm()
     fillValidForm()
-    fireEvent.change(screen.getByLabelText(/pack weight label/i), { target: { value: '500g' } })
-    fireEvent.change(screen.getByLabelText(/pack weight \(kg\)/i), { target: { value: '500' } })
+    fireEvent.change(screen.getByLabelText(/^pack weight/i), { target: { value: '500g' } })
 
     fireEvent.click(screen.getByRole('button', { name: /review run/i }))
 
     expect(
-      screen.getAllByText('Pack weight does not match. 500g must equal 0.5 kg.').length,
+      screen.getAllByText('The weight in Format must match Pack weight.').length,
     ).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { name: /start run/i })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /review run/i })).not.toBeInTheDocument()
@@ -175,7 +172,8 @@ describe('HmiScreen Start Run form', () => {
   it('shows the readable pack weight label and the converted kg value separately on the Review screen', async () => {
     await openStartRunForm()
     fillValidForm()
-    fireEvent.change(screen.getByLabelText(/pack weight label/i), { target: { value: '500g' } })
+    fireEvent.change(screen.getByLabelText(/^pack weight/i), { target: { value: '500g' } })
+    fireEvent.change(screen.getByLabelText(/^format/i), {target:{value:'500g x 8'}})
 
     fireEvent.click(screen.getByRole('button', { name: /review run/i }))
 
@@ -186,9 +184,10 @@ describe('HmiScreen Start Run form', () => {
 
   it('auto-fills the pack weight (kg) field from a valid pack weight label', async () => {
     await openStartRunForm()
-    fireEvent.change(screen.getByLabelText(/pack weight label/i), { target: { value: '500g' } })
+    fireEvent.change(screen.getByLabelText(/^pack weight/i), { target: { value: '500g' } })
 
-    expect(screen.getByLabelText(/pack weight \(kg\)/i)).toHaveValue(0.5)
+    expect(screen.queryByLabelText(/pack weight \(kg\)/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/packs per case/i)).not.toBeInTheDocument()
   })
 
   it('shows the Run Started confirmation with technician, target speed, pallets remaining and shift', async () => {

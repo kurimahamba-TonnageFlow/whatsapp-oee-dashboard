@@ -1,3 +1,4 @@
+import { parsePackFormat } from './packWeight'
 import { getCasepackerStatus } from '../engineering/casepackerApi'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -30,7 +31,7 @@ import {
   type PendingActionKind,
 } from './idempotency'
 import { DEFAULT_PLANNED_DOWNTIME_REASONS } from './constants'
-import { formatKg, parsePackWeightLabel } from './packWeight'
+import { parsePackWeightLabel } from './packWeight'
 import { resolveCurrentShift } from './shift'
 import { useLineStatePolling } from './useLineStatePolling'
 import { HomeScreen, type HmiConfigState } from './screens/HomeScreen'
@@ -581,15 +582,12 @@ export function HmiScreen() {
     setFormValues((prev) => {
       const next = { ...prev, [field]: value }
 
-      // Auto-fill the calculation field from a valid label, so the two
-      // stay in sync by default. The operator can still edit "Pack
-      // weight (kg)" afterwards - validation always checks the final
-      // combination at Review time regardless of how it got there.
       if (field === 'packWeightLabel') {
         const convertedKg = parsePackWeightLabel(value)
-        if (convertedKg !== null) {
-          next.packWeightKg = formatKg(convertedKg)
-        }
+        next.packWeightKg = convertedKg === null ? '' : String(convertedKg)
+      }
+      if (field === 'packWeightLabel' || field === 'packType') {
+        next.packsPerCase = parsePackFormat(next.packType, next.packWeightLabel).packsPerCase
       }
 
       return next
@@ -598,6 +596,9 @@ export function HmiScreen() {
 
   function handleReview() {
     const errors = validateStartRunForm(formValues)
+    const parsed = parsePackFormat(formValues.packType, formValues.packWeightLabel)
+    if (parsed.error) errors.packType = parsed.error
+    else if (parsed.packsPerCase !== formValues.packsPerCase) errors.packType = 'Re-enter the format to confirm packs per case.'
     setFormErrors(errors)
     if (!hasStartRunFormErrors(errors)) {
       setStartRunError(null)

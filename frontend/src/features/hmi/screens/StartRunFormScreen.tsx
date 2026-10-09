@@ -1,3 +1,4 @@
+import { parsePackFormat } from '../packWeight'
 import { StandardPreview } from '../components/StandardPreview'
 import type { FormEvent } from 'react'
 import { CUSTOMERS, LINE_TECHNICIANS, PRODUCTS, SHIFTS } from '../constants'
@@ -97,37 +98,13 @@ export function StartRunFormScreen({
           </label>
 
           <label className="hmi-field">
-            Pack weight label (e.g. 1kg, 500g)
+            Pack weight (e.g. 1kg, 500g)
             <input
               type="text"
               value={values.packWeightLabel}
               onChange={(e) => onChange('packWeightLabel', e.target.value)}
             />
-            <FieldError message={errors.packWeightLabel} />
-          </label>
-
-          <label className="hmi-field">
-            Pack weight (kg)
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.001"
-              value={values.packWeightKg}
-              onChange={(e) => onChange('packWeightKg', e.target.value)}
-            />
-            <FieldError message={errors.packWeightKg} />
-          </label>
-
-          <label className="hmi-field">
-            Packs per case
-            <input
-              type="number"
-              inputMode="numeric"
-              step="1"
-              value={values.packsPerCase}
-              onChange={(e) => onChange('packsPerCase', e.target.value)}
-            />
-            <FieldError message={errors.packsPerCase} />
+            <FieldError message={errors.packWeightLabel || errors.packWeightKg} />
           </label>
 
           <label className="hmi-field">
@@ -137,11 +114,11 @@ export function StartRunFormScreen({
               value={values.packType}
               onChange={(e) => onChange('packType', e.target.value)}
             />
-            <FieldError message={errors.packType} />
+            <FieldError message={errors.packType || (values.packType ? parsePackFormat(values.packType, values.packWeightLabel).error ?? errors.packsPerCase : errors.packsPerCase)} />
           </label>
 
           <StandardPreview values={values} />
-          <p className="hmi-field-help">Management sets the production standard for this configuration. Start Run selects the version effective at its start; it stays fixed for the run. Machine-speed reports provide context only.</p>
+          <p className="hmi-field-help">The management standard is fixed when the run starts. Pack weight and packs per case are calculated from your entries.</p>
 
           <label className="hmi-field">
             Cases per pallet

@@ -106,3 +106,15 @@ export function validatePackWeight(label: string, kgValue: string): PackWeightVa
 
   return { error: null, convertedKg }
 }
+
+/** Format contains pack weight x packs per case; numeric weights without units use kg. */
+export function parsePackFormat(format: string, weightLabel: string): {packsPerCase:string; error:string|null} {
+ const match=/^(\d+(?:\.\d+)?)\s*(kg|g)?\s*[x\u00d7]\s*([1-9]\d*)$/i.exec(format.trim())
+ if(!match)return {packsPerCase:'',error:'Use weight x packs per case, for example 1kg x 10 or 500g x 8.'}
+ const weight=parsePackWeightLabel(`${match[1]}${match[2]??'kg'}`)
+ const chosen=parsePackWeightLabel(weightLabel)
+ if(chosen==null||weight!==chosen)return {packsPerCase:'',error:'The weight in Format must match Pack weight.'}
+ const count=Number(match[3])
+ if(!Number.isSafeInteger(count)||count>10000)return {packsPerCase:'',error:'Check the number of packs per case.'}
+ return {packsPerCase:String(count),error:null}
+}
