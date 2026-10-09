@@ -201,3 +201,10 @@ export function getLive(token:string,weekStart:string|null,signal?:AbortSignal){
 export function saveLiveTarget(token:string,payload:{site:'site';week_start:string;week_start_day:number;target_tonnes:number;notes:string}){
  return apiClient.post('/api/v1/management/live-weekly-target',payload,{token})
 }
+
+/** One authenticated snapshot for operational evidence; no financial values. */
+export function getOperationalIntelligence(token: string, params: WindowParams, signal?: AbortSignal) {
+  return apiClient.get<import('./intelligence/types').IntelligenceSnapshot>(
+    `/api/v1/dashboard/operational-intelligence${query(params)}`, { token, signal },
+  )
+}

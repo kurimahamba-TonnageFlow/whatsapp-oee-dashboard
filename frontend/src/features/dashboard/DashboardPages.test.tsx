@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import intelligenceFixtures from '../../../preview/intelligence-fixtures.json'
+import type { IntelligenceSnapshot } from './intelligence/types'
 import { AppRoutes } from '../../routes/AppRoutes'
 import { ApiRequestError } from '../../api/client'
 import * as managementApi from '../management/api'
@@ -229,7 +231,10 @@ function overview(): DashboardOverview {
   }
 }
 
+const intelligence = () => structuredClone(intelligenceFixtures.normal) as unknown as IntelligenceSnapshot
+
 beforeEach(() => {
+  vi.mocked(dashboardApi.getOperationalIntelligence).mockResolvedValue(intelligence())
   vi.mocked(dashboardApi.getLive).mockImplementation(() => new Promise(() => {}))
   vi.mocked(managementApi.login).mockResolvedValue(LOGIN)
   vi.mocked(managementApi.logout).mockResolvedValue({ status: 'success', message: 'Logged out.' })
@@ -512,60 +517,68 @@ describe('QA page', () => {
 })
 
 describe('Operational Intelligence page', () => {
-  it('shows actual, target, gap and pace for this week, and downtime and losses for the period', async () => {
+  it('uses the authenticated snapshot for weekly tonnes, targets and actual stop evidence', async () => {
     await openAt('/dashboard/operational-intelligence')
-    await screen.findByRole('heading', { name: 'Where output was lost' })
-
-    const card = (name: string) => screen.getByRole('article', { name })
-    expect(within(card('Actual tonnes')).getByText('50.00 t')).toBeInTheDocument()
-    expect(within(card('Weekly target')).getByText('90.00 t')).toBeInTheDocument()
-    expect(within(card('Target gap')).getByText('40.00 t')).toBeInTheDocument()
-    expect(within(card('Planned downtime')).getByText('5 h 10 min')).toBeInTheDocument()
-    expect(within(card('Unplanned downtime')).getByText('8 h 06 min')).toBeInTheDocument()
-    expect(within(card('Estimated tonnes lost')).getByText('10.00 t')).toBeInTheDocument()
-
-    const target = screen.getByRole('region', { name: 'Target vs actual' })
-    expect(within(target).getAllByText('Behind pace').length).toBeGreaterThan(0)
-    expect(within(target).getByText(/Needed by now 54.00 t/)).toBeInTheDocument()
-
-    const losses = screen.getByRole('table', { name: 'Where output was lost' })
-    const rows = within(losses).getAllByRole('row')
-    expect(within(rows[1]).getByText('Rovema · Rovema BV2')).toBeInTheDocument()
-    expect(within(rows[2]).getByText('Changeover')).toBeInTheDocument()
-
-    expect(dashboardApi.getOverview).toHaveBeenCalledWith(
-      'dash-token',
-      { window: 'production_week', production_line: null },
-      expect.any(AbortSignal),
-    )
+    const card = await screen.findByRole('article', { name: 'Actual Tonnes This Week' })
+    expect(within(card).getByText('97.2 t')).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Weekly Tonnage Target' })).toHaveTextContent('97.2 t / 120.0 t')
+    expect(screen.getByRole('article', { name: 'Measured Output Gap' })).toHaveTextContent('48.3 t')
+    const table = screen.getByRole('table', { name: 'Top 3 Production Loss Drivers' })
+    const rows = within(table).getAllByRole('row')
+    expect(rows[1]).toHaveTextContent('Film tracking fault')
+    expect(rows[1]).toHaveTextContent('48.0')
+    expect(within(rows[1]).getByRole('link')).toHaveAttribute('href', '/dashboard/engineering?line=Guill&fault=1')
+    expect(dashboardApi.getOperationalIntelligence).toHaveBeenCalledWith('dash-token', { window: 'production_week', production_line: null }, expect.any(AbortSignal))
   })
 
-  it('says so when no weekly target is set, rather than showing a 0 t target', async () => {
-    vi.mocked(dashboardApi.getWeeklyTargets).mockImplementation(async (_token, weekStart) =>
-      weeklyTargets(
-        weekStart,
-        progress({ target_tonnes: null, tonnes_remaining: null, percent_complete: null, expected_tonnes_by_now: null, target_status: 'grey', status_reason: 'No weekly target has been set.' }),
-      ),
-    )
+  it('keeps missing targets and disconnected material stages honest', async () => {
+    const data = intelligence()
+    data.weekly.target_tonnes = null
+    data.weekly.progress_percent = null
+    vi.mocked(dashboardApi.getOperationalIntelligence).mockResolvedValue(data)
     await openAt('/dashboard/operational-intelligence')
-
-    expect(await screen.findByRole('heading', { name: 'No weekly target set' })).toBeInTheDocument()
-    expect(within(screen.getByRole('article', { name: 'Weekly target' })).getByText('Not set')).toBeInTheDocument()
-    expect(screen.queryByText('0.00 t')).not.toBeInTheDocument()
+    expect(await screen.findByRole('article', { name: 'Weekly Tonnage Target' })).toHaveTextContent('Not set')
+    expect(screen.getAllByText('Data not connected')).toHaveLength(4)
+    expect(screen.getByText('Unclassified output gap')).toBeInTheDocument()
+    expect(screen.getAllByText('Not verified')).toHaveLength(2)
   })
 
-  it('says the weekly downtime trend is not available yet', async () => {
+  it('labels the financial trend and bars as illustrations, never financial history', async () => {
     await openAt('/dashboard/operational-intelligence')
-    const trend = await screen.findByRole('region', { name: 'Downtime trend by week' })
+    const panel = await screen.findByRole('region', { name: 'Commercial Performance Overview' })
+    expect(panel).toHaveTextContent('Illustration Only')
+    expect(panel).toHaveTextContent('bars are illustrative, not measured costs')
+    expect(panel).not.toHaveTextContent('2,780')
+    expect(screen.getAllByText('PHASE 2').length).toBeGreaterThan(10)
+  })
 
-    expect(within(trend).getByText('Data not available yet')).toBeInTheDocument()
+  it('sends line and period filters and supports manual refresh', async () => {
+    await openAt('/dashboard/operational-intelligence')
+    await screen.findByRole('article', { name: 'Actual Tonnes This Week' })
+    fireEvent.change(screen.getByLabelText('Site / line'), { target: { value: 'Rovema' } })
+    await waitFor(() => expect(vi.mocked(dashboardApi.getOperationalIntelligence).mock.lastCall?.[1]).toEqual({ window: 'production_week', production_line: 'Rovema' }))
+    fireEvent.change(screen.getByLabelText('Reporting period'), { target: { value: 'current_shift' } })
+    await waitFor(() => expect(vi.mocked(dashboardApi.getOperationalIntelligence).mock.lastCall?.[1]).toEqual({ window: 'current_shift', production_line: 'Rovema' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Refresh/ })).toBeEnabled())
+    const before = vi.mocked(dashboardApi.getOperationalIntelligence).mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: /Refresh/ }))
+    await waitFor(() => expect(dashboardApi.getOperationalIntelligence).toHaveBeenCalledTimes(before + 1))
+  })
+
+  it('retains the last snapshot with a clear failed-refresh message', async () => {
+    await openAt('/dashboard/operational-intelligence')
+    await screen.findByRole('article', { name: 'Actual Tonnes This Week' })
+    vi.mocked(dashboardApi.getOperationalIntelligence).mockRejectedValueOnce(new ApiRequestError(503, 'down'))
+    fireEvent.click(screen.getByRole('button', { name: /Refresh/ }))
+    expect(await screen.findByText(/temporarily unavailable/i)).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Actual Tonnes This Week' })).toHaveTextContent('97.2 t')
   })
 })
 
 describe('Operational Intelligence - line stops between runs', () => {
   it('lists Other and the Restart delay after it as separate unplanned reasons', async () => {
-    vi.mocked(dashboardApi.getOverview).mockResolvedValue({
-      ...overview(),
+    vi.mocked(dashboardApi.getOperationalIntelligence).mockResolvedValue({
+      ...intelligence(),
       line_stops: {
         planned_minutes: 25,
         unplanned_minutes: 75,
@@ -578,6 +591,7 @@ describe('Operational Intelligence - line stops between runs', () => {
       },
     })
     await openAt('/dashboard/operational-intelligence')
+    fireEvent.click(await screen.findByText('Line stops between runs & data notes'))
 
     const table = await screen.findByRole('table', { name: 'Line stops between runs' })
     const rows = within(table).getAllByRole('row')
@@ -590,11 +604,12 @@ describe('Operational Intelligence - line stops between runs', () => {
   })
 
   it('says so plainly when there were no line stops in the period', async () => {
-    vi.mocked(dashboardApi.getOverview).mockResolvedValue({
-      ...overview(),
+    vi.mocked(dashboardApi.getOperationalIntelligence).mockResolvedValue({
+      ...intelligence(),
       line_stops: { planned_minutes: 0, unplanned_minutes: 0, note: 'n', by_reason: [] },
     })
     await openAt('/dashboard/operational-intelligence')
+    fireEvent.click(await screen.findByText('Line stops between runs & data notes'))
 
     expect(await screen.findByText(/no handover, changeover, other stop, restart delay or not scheduled time/i)).toBeInTheDocument()
   })
@@ -602,8 +617,8 @@ describe('Operational Intelligence - line stops between runs', () => {
 
 describe('Operational Intelligence - not scheduled time', () => {
   it('lists Not scheduled as its own type, never as a loss', async () => {
-    vi.mocked(dashboardApi.getOverview).mockResolvedValue({
-      ...overview(),
+    vi.mocked(dashboardApi.getOperationalIntelligence).mockResolvedValue({
+      ...intelligence(),
       line_stops: {
         planned_minutes: 0,
         unplanned_minutes: 30,
@@ -616,6 +631,7 @@ describe('Operational Intelligence - not scheduled time', () => {
       },
     })
     await openAt('/dashboard/operational-intelligence')
+    fireEvent.click(await screen.findByText('Line stops between runs & data notes'))
 
     const table = await screen.findByRole('table', { name: 'Line stops between runs' })
     const rows = within(table).getAllByRole('row')

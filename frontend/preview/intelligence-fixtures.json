@@ -1,0 +1,1249 @@
+{
+  "normal": {
+    "generated_at": "2026-10-09T10:20:00+00:00",
+    "window": {
+      "kind": "production_week",
+      "label": "Production week from 2026-10-05",
+      "timezone": "Europe/London",
+      "start": "2026-10-05T05:00:00+00:00",
+      "end": "2026-10-12T05:00:00+00:00",
+      "start_local": "2026-10-05T06:00:00+01:00",
+      "end_local": "2026-10-12T06:00:00+01:00"
+    },
+    "configured_lines": [
+      "Rovema",
+      "GIC",
+      "Guill"
+    ],
+    "selected_line": null,
+    "weekly": {
+      "week_start": "2026-10-05",
+      "window": {
+        "kind": "production_week",
+        "label": "Production week from 2026-10-05",
+        "timezone": "Europe/London",
+        "start": "2026-10-05T05:00:00+00:00",
+        "end": "2026-10-12T05:00:00+00:00",
+        "start_local": "2026-10-05T06:00:00+01:00",
+        "end_local": "2026-10-12T06:00:00+01:00"
+      },
+      "site": "This factory",
+      "target_tonnes": 120.0,
+      "actual_tonnes": 97.212,
+      "progress_percent": 81.01,
+      "confirmed_readings": 24,
+      "excluded_readings": 0,
+      "boundary_readings": 0,
+      "notes": "Synthetic weekly plan",
+      "set_by": "Preview manager",
+      "method": "Confirmed hourly pallets x the run\u2019s historical cases/pallet x packs/case x kg/pack. Whole readings belong to their recorded operational shift. Produced, not dispatched tonnes.",
+      "elapsed_percent": 60.317460317460316,
+      "elapsed_days": 4.222222222222222,
+      "comparison_percent": null,
+      "comparison_note": "Comparable previous-week coverage unavailable"
+    },
+    "lines": [
+      {
+        "name": "Rovema",
+        "status": "running",
+        "status_label": "Running at last report",
+        "tone": "success",
+        "status_recorded_at": "2026-10-09T10:00:00+00:00",
+        "last_production_at": "2026-10-09T10:00:00+00:00",
+        "job": {
+          "run_id": 1,
+          "product": "White Basmati",
+          "customer": "Aldi",
+          "format": "1 kg x 10",
+          "pack_weight_kg": 1.0,
+          "speed_ppm": 120.0,
+          "completed_pallets": 52.632,
+          "remaining_pallets": 11.368,
+          "progress_percent": 82.2375,
+          "estimate_hours": null,
+          "estimate_status": "Estimate unavailable"
+        },
+        "changeover": null,
+        "last_hour": {
+          "hour_start": "2026-10-09T09:00:00+00:00",
+          "hour_end": "2026-10-09T10:00:00+00:00",
+          "hour_label": "10:00\u201311:00",
+          "is_complete": true,
+          "line": {
+            "status": "reported",
+            "target_packs": 7200.0,
+            "actual_packs": 6480.0,
+            "output_vs_target_percent": 90.0,
+            "is_low_output": false,
+            "covered_minutes": 60.0,
+            "unaccounted_minutes": 0.0,
+            "not_scheduled_minutes": 0.0,
+            "stoppage_reference_missing": false,
+            "stopped_minutes": 10.0,
+            "planned_minutes": 0.0,
+            "unplanned_minutes": 10.0,
+            "stop_reasons": [
+              {
+                "kind": "unplanned",
+                "reason": "BV2 \u2014 Vertical seal adjustment",
+                "minutes": 10.0
+              }
+            ],
+            "reconciliation": {
+              "target_packs": 7200.0,
+              "actual_packs": 6480.0,
+              "signed_variance_packs": -720.0,
+              "shortfall_packs": 720.0,
+              "overproduction_packs": 0.0,
+              "remaining_gap_packs": 0.0,
+              "raw_planned_packs": 0.0,
+              "raw_unplanned_packs": 1200.0,
+              "allocated_planned_packs": 0.0,
+              "allocated_unplanned_packs": 720.0,
+              "excess_modelled_packs": 480.0,
+              "operating_context": [],
+              "covered_periods": 1,
+              "total_periods": 1,
+              "coverage_complete": true,
+              "reported_explanations": [],
+              "limitations": [
+                "Modelled contributions exceed observed shortfall; stop timing/output need review."
+              ]
+            }
+          },
+          "runs": [
+            {
+              "reconciliation": {
+                "target_packs": 7200.0,
+                "actual_packs": 6480.0,
+                "signed_variance_packs": -720.0,
+                "shortfall_packs": 720.0,
+                "overproduction_packs": 0.0,
+                "remaining_gap_packs": 0.0,
+                "equivalent_minutes": 0.0,
+                "prompt_required": false,
+                "scheduled_minutes": 60.0,
+                "planned_minutes": 0.0,
+                "unplanned_minutes": 10.0,
+                "raw_planned_packs": 0.0,
+                "raw_unplanned_packs": 1200.0,
+                "allocated_planned_packs": 0.0,
+                "allocated_unplanned_packs": 720.0,
+                "excess_modelled_packs": 480.0,
+                "reported_explanation": null,
+                "operating_context": [],
+                "limitations": [
+                  "Modelled contributions exceed observed shortfall; stop timing/output need review."
+                ],
+                "comparable": true
+              },
+              "run_id": 1,
+              "product": "White Basmati",
+              "customer": "Aldi",
+              "line_technician": "Liam",
+              "status": "reported",
+              "applicable_start": "2026-10-09T09:00:00+00:00",
+              "applicable_end": "2026-10-09T10:00:00+00:00",
+              "applicable_minutes": 60.0,
+              "is_partial_hour": false,
+              "target_speeds": [
+                {
+                  "from": "2026-10-09T09:00:00+00:00",
+                  "to": "2026-10-09T10:00:00+00:00",
+                  "speed_ppm": 120.0
+                }
+              ],
+              "actual_speed_ppm": 108.0,
+              "target_packs": 7200.0,
+              "actual_packs": 6480.0,
+              "output_vs_target_percent": 90.0,
+              "is_low_output": false,
+              "stopped_minutes": 10.0,
+              "planned_minutes": 0.0,
+              "unplanned_minutes": 10.0,
+              "stop_reasons": [
+                {
+                  "kind": "unplanned",
+                  "reason": "BV2 \u2014 Vertical seal adjustment",
+                  "minutes": 10.0
+                }
+              ]
+            }
+          ]
+        },
+        "current_issue": "No unresolved production fault",
+        "current_fault_id": null
+      },
+      {
+        "name": "GIC",
+        "status": "changeover",
+        "status_label": "Changeover",
+        "tone": "warning",
+        "status_recorded_at": "2026-10-09T10:05:00+00:00",
+        "last_production_at": "2026-10-09T10:00:00+00:00",
+        "job": null,
+        "changeover": {
+          "id": 1,
+          "kind": "format",
+          "elapsed_minutes": 15.0,
+          "physical_complete": false,
+          "qa_status": "awaiting_verification",
+          "engineering_ready": false,
+          "engineer": "Marina"
+        },
+        "last_hour": {
+          "hour_start": "2026-10-09T09:00:00+00:00",
+          "hour_end": "2026-10-09T10:00:00+00:00",
+          "hour_label": "10:00\u201311:00",
+          "is_complete": true,
+          "line": {
+            "status": "reported",
+            "target_packs": 6000.0,
+            "actual_packs": 3600.0,
+            "output_vs_target_percent": 60.0,
+            "is_low_output": false,
+            "covered_minutes": 60.0,
+            "unaccounted_minutes": 0.0,
+            "not_scheduled_minutes": 0.0,
+            "stoppage_reference_missing": false,
+            "stopped_minutes": 0.0,
+            "planned_minutes": 0.0,
+            "unplanned_minutes": 0.0,
+            "stop_reasons": [],
+            "reconciliation": {
+              "target_packs": 6000.0,
+              "actual_packs": 3600.0,
+              "signed_variance_packs": -2400.0,
+              "shortfall_packs": 2400.0,
+              "overproduction_packs": 0.0,
+              "remaining_gap_packs": 2400.0,
+              "raw_planned_packs": 0.0,
+              "raw_unplanned_packs": 0.0,
+              "allocated_planned_packs": 0.0,
+              "allocated_unplanned_packs": 0.0,
+              "excess_modelled_packs": 0.0,
+              "operating_context": [],
+              "covered_periods": 1,
+              "total_periods": 1,
+              "coverage_complete": true,
+              "reported_explanations": [],
+              "limitations": []
+            }
+          },
+          "runs": [
+            {
+              "reconciliation": {
+                "target_packs": 6000.0,
+                "actual_packs": 3600.0,
+                "signed_variance_packs": -2400.0,
+                "shortfall_packs": 2400.0,
+                "overproduction_packs": 0.0,
+                "remaining_gap_packs": 2400.0,
+                "equivalent_minutes": 24.0,
+                "prompt_required": true,
+                "scheduled_minutes": 60.0,
+                "planned_minutes": 0.0,
+                "unplanned_minutes": 0.0,
+                "raw_planned_packs": 0.0,
+                "raw_unplanned_packs": 0.0,
+                "allocated_planned_packs": 0.0,
+                "allocated_unplanned_packs": 0.0,
+                "excess_modelled_packs": 0.0,
+                "reported_explanation": null,
+                "operating_context": [],
+                "limitations": [],
+                "comparable": true
+              },
+              "run_id": 2,
+              "product": "Basmati",
+              "customer": "Waitrose",
+              "line_technician": "Liam",
+              "status": "reported",
+              "applicable_start": "2026-10-09T09:00:00+00:00",
+              "applicable_end": "2026-10-09T10:00:00+00:00",
+              "applicable_minutes": 60.0,
+              "is_partial_hour": false,
+              "target_speeds": [
+                {
+                  "from": "2026-10-09T09:00:00+00:00",
+                  "to": "2026-10-09T10:00:00+00:00",
+                  "speed_ppm": 100.0
+                }
+              ],
+              "actual_speed_ppm": 60.0,
+              "target_packs": 6000.0,
+              "actual_packs": 3600.0,
+              "output_vs_target_percent": 60.0,
+              "is_low_output": false,
+              "stopped_minutes": 0.0,
+              "planned_minutes": 0.0,
+              "unplanned_minutes": 0.0,
+              "stop_reasons": []
+            }
+          ]
+        },
+        "current_issue": "Changeover in progress",
+        "current_fault_id": null
+      },
+      {
+        "name": "Guill",
+        "status": "stopped",
+        "status_label": "Production stopped",
+        "tone": "danger",
+        "status_recorded_at": "2026-10-09T09:55:00+00:00",
+        "last_production_at": "2026-10-09T10:00:00+00:00",
+        "job": {
+          "run_id": 3,
+          "product": "Brown Basmati",
+          "customer": "Tesco",
+          "format": "1 kg x 10",
+          "pack_weight_kg": 1.0,
+          "speed_ppm": 80.0,
+          "completed_pallets": 15.12,
+          "remaining_pallets": 48.88,
+          "progress_percent": 23.625,
+          "estimate_hours": null,
+          "estimate_status": "Estimate unavailable"
+        },
+        "changeover": null,
+        "last_hour": {
+          "hour_start": "2026-10-09T09:00:00+00:00",
+          "hour_end": "2026-10-09T10:00:00+00:00",
+          "hour_label": "10:00\u201311:00",
+          "is_complete": true,
+          "line": {
+            "status": "reported",
+            "target_packs": 4800.0,
+            "actual_packs": 1824.0,
+            "output_vs_target_percent": 38.0,
+            "is_low_output": true,
+            "covered_minutes": 60.0,
+            "unaccounted_minutes": 0.0,
+            "not_scheduled_minutes": 0.0,
+            "stoppage_reference_missing": false,
+            "stopped_minutes": 28.0,
+            "planned_minutes": 0.0,
+            "unplanned_minutes": 28.0,
+            "stop_reasons": [
+              {
+                "kind": "unplanned",
+                "reason": "Bagger \u2014 Film tracking fault",
+                "minutes": 28.0
+              },
+              {
+                "kind": "unplanned",
+                "reason": "X-ray \u2014 Reject sensor fault",
+                "minutes": 5.0
+              }
+            ],
+            "reconciliation": {
+              "target_packs": 4800.0,
+              "actual_packs": 1824.0,
+              "signed_variance_packs": -2976.0,
+              "shortfall_packs": 2976.0,
+              "overproduction_packs": 0.0,
+              "remaining_gap_packs": 736.0,
+              "raw_planned_packs": 0.0,
+              "raw_unplanned_packs": 2240.0,
+              "allocated_planned_packs": 0.0,
+              "allocated_unplanned_packs": 2240.0,
+              "excess_modelled_packs": 0.0,
+              "operating_context": [],
+              "covered_periods": 1,
+              "total_periods": 1,
+              "coverage_complete": true,
+              "reported_explanations": [],
+              "limitations": []
+            }
+          },
+          "runs": [
+            {
+              "reconciliation": {
+                "target_packs": 4800.0,
+                "actual_packs": 1824.0,
+                "signed_variance_packs": -2976.0,
+                "shortfall_packs": 2976.0,
+                "overproduction_packs": 0.0,
+                "remaining_gap_packs": 736.0,
+                "equivalent_minutes": 9.2,
+                "prompt_required": false,
+                "scheduled_minutes": 60.0,
+                "planned_minutes": 0.0,
+                "unplanned_minutes": 28.0,
+                "raw_planned_packs": 0.0,
+                "raw_unplanned_packs": 2240.0,
+                "allocated_planned_packs": 0.0,
+                "allocated_unplanned_packs": 2240.0,
+                "excess_modelled_packs": 0.0,
+                "reported_explanation": null,
+                "operating_context": [],
+                "limitations": [],
+                "comparable": true
+              },
+              "run_id": 3,
+              "product": "Brown Basmati",
+              "customer": "Tesco",
+              "line_technician": "Liam",
+              "status": "reported",
+              "applicable_start": "2026-10-09T09:00:00+00:00",
+              "applicable_end": "2026-10-09T10:00:00+00:00",
+              "applicable_minutes": 60.0,
+              "is_partial_hour": false,
+              "target_speeds": [
+                {
+                  "from": "2026-10-09T09:00:00+00:00",
+                  "to": "2026-10-09T10:00:00+00:00",
+                  "speed_ppm": 80.0
+                }
+              ],
+              "actual_speed_ppm": 30.4,
+              "target_packs": 4800.0,
+              "actual_packs": 1824.0,
+              "output_vs_target_percent": 38.0,
+              "is_low_output": true,
+              "stopped_minutes": 28.0,
+              "planned_minutes": 0.0,
+              "unplanned_minutes": 28.0,
+              "stop_reasons": [
+                {
+                  "kind": "unplanned",
+                  "reason": "Bagger \u2014 Film tracking fault",
+                  "minutes": 28.0
+                },
+                {
+                  "kind": "unplanned",
+                  "reason": "X-ray \u2014 Reject sensor fault",
+                  "minutes": 5.0
+                }
+              ]
+            }
+          ]
+        },
+        "current_issue": "Film tracking fault",
+        "current_fault_id": 1
+      }
+    ],
+    "output_gap": {
+      "total_tonnes": 48.288,
+      "unclassified_tonnes": 48.288,
+      "recoverable_tonnes": null,
+      "delayed_tonnes": null,
+      "confirmed_unrecovered_tonnes": null,
+      "note": "Recoverability not yet assessed. Output gap is not confirmed commercial loss."
+    },
+    "downtime": {
+      "planned_minutes": 35.0,
+      "unplanned_minutes": 73.0,
+      "not_scheduled_minutes": 0.0,
+      "unplanned_percent": 67.5925925925926
+    },
+    "loss_drivers": [
+      {
+        "line": "Guill",
+        "machine": "Bagger",
+        "cause": "Film tracking fault",
+        "minutes": 48.0,
+        "events": 1,
+        "fault_ids": [
+          1
+        ],
+        "estimated_tonnes": null,
+        "investigation": "Review fault history and confirm the cause with Engineering."
+      },
+      {
+        "line": "Rovema",
+        "machine": "BV2",
+        "cause": "Vertical seal adjustment",
+        "minutes": 25.0,
+        "events": 1,
+        "fault_ids": [
+          3
+        ],
+        "estimated_tonnes": null,
+        "investigation": "Review fault history and confirm the cause with Engineering."
+      },
+      {
+        "line": "GIC",
+        "machine": "Planned stop",
+        "cause": "Film change",
+        "minutes": 20.0,
+        "events": 1,
+        "fault_ids": [],
+        "estimated_tonnes": null,
+        "investigation": "Review the recorded stop sequence and waiting time."
+      }
+    ],
+    "ranking_method": "Ranked by non-overlapping recorded stop minutes. Per-cause tonnes are not reliably attributable.",
+    "line_stops": {
+      "planned_minutes": 15.0,
+      "unplanned_minutes": 0.0,
+      "not_scheduled_minutes": 0.0,
+      "by_reason": [
+        {
+          "production_line": "GIC",
+          "downtime_type": "planned",
+          "reason": "Changeover \u2014 physical work",
+          "minutes": 15.0,
+          "estimated_lost_tonnes": 1.5
+        }
+      ],
+      "note": "Stops between product runs (handover, changeover, Other and the restart delay after it) belong to the line, not to any run, so they are listed separately and are not part of the run-based downtime, gap or Estimated OEE figures. Minutes are clipped to the period; lost output uses the previous run's target speed and pack weight."
+    },
+    "data_issues": [],
+    "material_flow": [
+      {
+        "stage": "Intake",
+        "connected": false,
+        "tonnes": null
+      },
+      {
+        "stage": "Process",
+        "connected": false,
+        "tonnes": null
+      },
+      {
+        "stage": "Packaging",
+        "connected": true,
+        "tonnes": 97.212
+      },
+      {
+        "stage": "Finished Goods",
+        "connected": false,
+        "tonnes": null
+      },
+      {
+        "stage": "Dispatch",
+        "connected": false,
+        "tonnes": null
+      }
+    ],
+    "capabilities": {
+      "production_intelligence": true,
+      "financial_intelligence": false,
+      "scope": "current_factory"
+    }
+  },
+  "empty": {
+    "generated_at": "2026-10-09T10:20:00+00:00",
+    "window": {
+      "kind": "production_week",
+      "label": "Production week from 2026-10-05",
+      "timezone": "Europe/London",
+      "start": "2026-10-05T05:00:00+00:00",
+      "end": "2026-10-12T05:00:00+00:00",
+      "start_local": "2026-10-05T06:00:00+01:00",
+      "end_local": "2026-10-12T06:00:00+01:00"
+    },
+    "configured_lines": [
+      "Rovema",
+      "GIC",
+      "Guill"
+    ],
+    "selected_line": null,
+    "weekly": {
+      "week_start": "2026-10-05",
+      "window": {
+        "kind": "production_week",
+        "label": "Production week from 2026-10-05",
+        "timezone": "Europe/London",
+        "start": "2026-10-05T05:00:00+00:00",
+        "end": "2026-10-12T05:00:00+00:00",
+        "start_local": "2026-10-05T06:00:00+01:00",
+        "end_local": "2026-10-12T06:00:00+01:00"
+      },
+      "site": "This factory",
+      "target_tonnes": null,
+      "actual_tonnes": null,
+      "progress_percent": null,
+      "confirmed_readings": 0,
+      "excluded_readings": 0,
+      "boundary_readings": 0,
+      "notes": "",
+      "set_by": null,
+      "method": "Confirmed hourly pallets x the run\u2019s historical cases/pallet x packs/case x kg/pack. Whole readings belong to their recorded operational shift. Produced, not dispatched tonnes.",
+      "elapsed_percent": 60.317460317460316,
+      "elapsed_days": 4.222222222222222,
+      "comparison_percent": null,
+      "comparison_note": "Comparable previous-week coverage unavailable"
+    },
+    "lines": [
+      {
+        "name": "Rovema",
+        "status": "idle",
+        "status_label": "No active run",
+        "tone": "neutral",
+        "status_recorded_at": null,
+        "last_production_at": null,
+        "job": null,
+        "changeover": null,
+        "last_hour": {
+          "hour_start": "2026-10-09T09:00:00+00:00",
+          "hour_end": "2026-10-09T10:00:00+00:00",
+          "hour_label": "10:00\u201311:00",
+          "is_complete": true,
+          "line": {
+            "status": "idle",
+            "target_packs": 0.0,
+            "actual_packs": null,
+            "output_vs_target_percent": null,
+            "is_low_output": false,
+            "covered_minutes": 0.0,
+            "unaccounted_minutes": 60.0,
+            "not_scheduled_minutes": 0.0,
+            "stoppage_reference_missing": false,
+            "stopped_minutes": 0.0,
+            "planned_minutes": 0.0,
+            "unplanned_minutes": 0.0,
+            "stop_reasons": [],
+            "reconciliation": {
+              "target_packs": 0.0,
+              "actual_packs": 0.0,
+              "signed_variance_packs": 0.0,
+              "shortfall_packs": 0.0,
+              "overproduction_packs": 0.0,
+              "remaining_gap_packs": 0.0,
+              "raw_planned_packs": 0.0,
+              "raw_unplanned_packs": 0.0,
+              "allocated_planned_packs": 0.0,
+              "allocated_unplanned_packs": 0.0,
+              "excess_modelled_packs": 0.0,
+              "operating_context": [],
+              "covered_periods": 0,
+              "total_periods": 0,
+              "coverage_complete": false,
+              "reported_explanations": [],
+              "limitations": []
+            }
+          },
+          "runs": []
+        },
+        "current_issue": "No unresolved production fault",
+        "current_fault_id": null
+      },
+      {
+        "name": "GIC",
+        "status": "idle",
+        "status_label": "No active run",
+        "tone": "neutral",
+        "status_recorded_at": null,
+        "last_production_at": null,
+        "job": null,
+        "changeover": null,
+        "last_hour": {
+          "hour_start": "2026-10-09T09:00:00+00:00",
+          "hour_end": "2026-10-09T10:00:00+00:00",
+          "hour_label": "10:00\u201311:00",
+          "is_complete": true,
+          "line": {
+            "status": "idle",
+            "target_packs": 0.0,
+            "actual_packs": null,
+            "output_vs_target_percent": null,
+            "is_low_output": false,
+            "covered_minutes": 0.0,
+            "unaccounted_minutes": 60.0,
+            "not_scheduled_minutes": 0.0,
+            "stoppage_reference_missing": false,
+            "stopped_minutes": 0.0,
+            "planned_minutes": 0.0,
+            "unplanned_minutes": 0.0,
+            "stop_reasons": [],
+            "reconciliation": {
+              "target_packs": 0.0,
+              "actual_packs": 0.0,
+              "signed_variance_packs": 0.0,
+              "shortfall_packs": 0.0,
+              "overproduction_packs": 0.0,
+              "remaining_gap_packs": 0.0,
+              "raw_planned_packs": 0.0,
+              "raw_unplanned_packs": 0.0,
+              "allocated_planned_packs": 0.0,
+              "allocated_unplanned_packs": 0.0,
+              "excess_modelled_packs": 0.0,
+              "operating_context": [],
+              "covered_periods": 0,
+              "total_periods": 0,
+              "coverage_complete": false,
+              "reported_explanations": [],
+              "limitations": []
+            }
+          },
+          "runs": []
+        },
+        "current_issue": "No unresolved production fault",
+        "current_fault_id": null
+      },
+      {
+        "name": "Guill",
+        "status": "idle",
+        "status_label": "No active run",
+        "tone": "neutral",
+        "status_recorded_at": null,
+        "last_production_at": null,
+        "job": null,
+        "changeover": null,
+        "last_hour": {
+          "hour_start": "2026-10-09T09:00:00+00:00",
+          "hour_end": "2026-10-09T10:00:00+00:00",
+          "hour_label": "10:00\u201311:00",
+          "is_complete": true,
+          "line": {
+            "status": "idle",
+            "target_packs": 0.0,
+            "actual_packs": null,
+            "output_vs_target_percent": null,
+            "is_low_output": false,
+            "covered_minutes": 0.0,
+            "unaccounted_minutes": 60.0,
+            "not_scheduled_minutes": 0.0,
+            "stoppage_reference_missing": false,
+            "stopped_minutes": 0.0,
+            "planned_minutes": 0.0,
+            "unplanned_minutes": 0.0,
+            "stop_reasons": [],
+            "reconciliation": {
+              "target_packs": 0.0,
+              "actual_packs": 0.0,
+              "signed_variance_packs": 0.0,
+              "shortfall_packs": 0.0,
+              "overproduction_packs": 0.0,
+              "remaining_gap_packs": 0.0,
+              "raw_planned_packs": 0.0,
+              "raw_unplanned_packs": 0.0,
+              "allocated_planned_packs": 0.0,
+              "allocated_unplanned_packs": 0.0,
+              "excess_modelled_packs": 0.0,
+              "operating_context": [],
+              "covered_periods": 0,
+              "total_periods": 0,
+              "coverage_complete": false,
+              "reported_explanations": [],
+              "limitations": []
+            }
+          },
+          "runs": []
+        },
+        "current_issue": "No unresolved production fault",
+        "current_fault_id": null
+      }
+    ],
+    "output_gap": {
+      "total_tonnes": null,
+      "unclassified_tonnes": null,
+      "recoverable_tonnes": null,
+      "delayed_tonnes": null,
+      "confirmed_unrecovered_tonnes": null,
+      "note": "Recoverability not yet assessed. Output gap is not confirmed commercial loss."
+    },
+    "downtime": {
+      "planned_minutes": 0.0,
+      "unplanned_minutes": 0.0,
+      "not_scheduled_minutes": 0.0,
+      "unplanned_percent": null
+    },
+    "loss_drivers": [],
+    "ranking_method": "Ranked by non-overlapping recorded stop minutes. Per-cause tonnes are not reliably attributable.",
+    "line_stops": {
+      "planned_minutes": 0.0,
+      "unplanned_minutes": 0.0,
+      "not_scheduled_minutes": 0.0,
+      "by_reason": [],
+      "note": "Stops between product runs (handover, changeover, Other and the restart delay after it) belong to the line, not to any run, so they are listed separately and are not part of the run-based downtime, gap or Estimated OEE figures. Minutes are clipped to the period; lost output uses the previous run's target speed and pack weight."
+    },
+    "data_issues": [],
+    "material_flow": [
+      {
+        "stage": "Intake",
+        "connected": false,
+        "tonnes": null
+      },
+      {
+        "stage": "Process",
+        "connected": false,
+        "tonnes": null
+      },
+      {
+        "stage": "Packaging",
+        "connected": true,
+        "tonnes": null
+      },
+      {
+        "stage": "Finished Goods",
+        "connected": false,
+        "tonnes": null
+      },
+      {
+        "stage": "Dispatch",
+        "connected": false,
+        "tonnes": null
+      }
+    ],
+    "capabilities": {
+      "production_intelligence": true,
+      "financial_intelligence": false,
+      "scope": "current_factory"
+    }
+  },
+  "unscheduled": {
+    "generated_at": "2026-10-09T10:20:00+00:00",
+    "window": {
+      "kind": "production_week",
+      "label": "Production week from 2026-10-05",
+      "timezone": "Europe/London",
+      "start": "2026-10-05T05:00:00+00:00",
+      "end": "2026-10-12T05:00:00+00:00",
+      "start_local": "2026-10-05T06:00:00+01:00",
+      "end_local": "2026-10-12T06:00:00+01:00"
+    },
+    "configured_lines": [
+      "Rovema",
+      "GIC",
+      "Guill"
+    ],
+    "selected_line": null,
+    "weekly": {
+      "week_start": "2026-10-05",
+      "window": {
+        "kind": "production_week",
+        "label": "Production week from 2026-10-05",
+        "timezone": "Europe/London",
+        "start": "2026-10-05T05:00:00+00:00",
+        "end": "2026-10-12T05:00:00+00:00",
+        "start_local": "2026-10-05T06:00:00+01:00",
+        "end_local": "2026-10-12T06:00:00+01:00"
+      },
+      "site": "This factory",
+      "target_tonnes": 120.0,
+      "actual_tonnes": 67.752,
+      "progress_percent": 56.46,
+      "confirmed_readings": 16,
+      "excluded_readings": 0,
+      "boundary_readings": 0,
+      "notes": "Synthetic weekly plan",
+      "set_by": "Preview manager",
+      "method": "Confirmed hourly pallets x the run\u2019s historical cases/pallet x packs/case x kg/pack. Whole readings belong to their recorded operational shift. Produced, not dispatched tonnes.",
+      "elapsed_percent": 60.317460317460316,
+      "elapsed_days": 4.222222222222222,
+      "comparison_percent": null,
+      "comparison_note": "Comparable previous-week coverage unavailable"
+    },
+    "lines": [
+      {
+        "name": "Rovema",
+        "status": "running",
+        "status_label": "Running at last report",
+        "tone": "success",
+        "status_recorded_at": "2026-10-09T10:00:00+00:00",
+        "last_production_at": "2026-10-09T10:00:00+00:00",
+        "job": {
+          "run_id": 1,
+          "product": "White Basmati",
+          "customer": "Aldi",
+          "format": "1 kg x 10",
+          "pack_weight_kg": 1.0,
+          "speed_ppm": 120.0,
+          "completed_pallets": 52.632,
+          "remaining_pallets": 11.368,
+          "progress_percent": 82.2375,
+          "estimate_hours": null,
+          "estimate_status": "Estimate unavailable"
+        },
+        "changeover": null,
+        "last_hour": {
+          "hour_start": "2026-10-09T09:00:00+00:00",
+          "hour_end": "2026-10-09T10:00:00+00:00",
+          "hour_label": "10:00\u201311:00",
+          "is_complete": true,
+          "line": {
+            "status": "reported",
+            "target_packs": 7200.0,
+            "actual_packs": 6480.0,
+            "output_vs_target_percent": 90.0,
+            "is_low_output": false,
+            "covered_minutes": 60.0,
+            "unaccounted_minutes": 0.0,
+            "not_scheduled_minutes": 0.0,
+            "stoppage_reference_missing": false,
+            "stopped_minutes": 10.0,
+            "planned_minutes": 0.0,
+            "unplanned_minutes": 10.0,
+            "stop_reasons": [
+              {
+                "kind": "unplanned",
+                "reason": "BV2 \u2014 Vertical seal adjustment",
+                "minutes": 10.0
+              }
+            ],
+            "reconciliation": {
+              "target_packs": 7200.0,
+              "actual_packs": 6480.0,
+              "signed_variance_packs": -720.0,
+              "shortfall_packs": 720.0,
+              "overproduction_packs": 0.0,
+              "remaining_gap_packs": 0.0,
+              "raw_planned_packs": 0.0,
+              "raw_unplanned_packs": 1200.0,
+              "allocated_planned_packs": 0.0,
+              "allocated_unplanned_packs": 720.0,
+              "excess_modelled_packs": 480.0,
+              "operating_context": [],
+              "covered_periods": 1,
+              "total_periods": 1,
+              "coverage_complete": true,
+              "reported_explanations": [],
+              "limitations": [
+                "Modelled contributions exceed observed shortfall; stop timing/output need review."
+              ]
+            }
+          },
+          "runs": [
+            {
+              "reconciliation": {
+                "target_packs": 7200.0,
+                "actual_packs": 6480.0,
+                "signed_variance_packs": -720.0,
+                "shortfall_packs": 720.0,
+                "overproduction_packs": 0.0,
+                "remaining_gap_packs": 0.0,
+                "equivalent_minutes": 0.0,
+                "prompt_required": false,
+                "scheduled_minutes": 60.0,
+                "planned_minutes": 0.0,
+                "unplanned_minutes": 10.0,
+                "raw_planned_packs": 0.0,
+                "raw_unplanned_packs": 1200.0,
+                "allocated_planned_packs": 0.0,
+                "allocated_unplanned_packs": 720.0,
+                "excess_modelled_packs": 480.0,
+                "reported_explanation": null,
+                "operating_context": [],
+                "limitations": [
+                  "Modelled contributions exceed observed shortfall; stop timing/output need review."
+                ],
+                "comparable": true
+              },
+              "run_id": 1,
+              "product": "White Basmati",
+              "customer": "Aldi",
+              "line_technician": "Liam",
+              "status": "reported",
+              "applicable_start": "2026-10-09T09:00:00+00:00",
+              "applicable_end": "2026-10-09T10:00:00+00:00",
+              "applicable_minutes": 60.0,
+              "is_partial_hour": false,
+              "target_speeds": [
+                {
+                  "from": "2026-10-09T09:00:00+00:00",
+                  "to": "2026-10-09T10:00:00+00:00",
+                  "speed_ppm": 120.0
+                }
+              ],
+              "actual_speed_ppm": 108.0,
+              "target_packs": 7200.0,
+              "actual_packs": 6480.0,
+              "output_vs_target_percent": 90.0,
+              "is_low_output": false,
+              "stopped_minutes": 10.0,
+              "planned_minutes": 0.0,
+              "unplanned_minutes": 10.0,
+              "stop_reasons": [
+                {
+                  "kind": "unplanned",
+                  "reason": "BV2 \u2014 Vertical seal adjustment",
+                  "minutes": 10.0
+                }
+              ]
+            }
+          ]
+        },
+        "current_issue": "No unresolved production fault",
+        "current_fault_id": null
+      },
+      {
+        "name": "GIC",
+        "status": "not_scheduled",
+        "status_label": "Not Scheduled",
+        "tone": "neutral",
+        "status_recorded_at": "2026-10-09T00:00:00+00:00",
+        "last_production_at": null,
+        "job": null,
+        "changeover": null,
+        "last_hour": {
+          "hour_start": "2026-10-09T09:00:00+00:00",
+          "hour_end": "2026-10-09T10:00:00+00:00",
+          "hour_label": "10:00\u201311:00",
+          "is_complete": true,
+          "line": {
+            "status": "not_scheduled",
+            "target_packs": 0.0,
+            "actual_packs": null,
+            "output_vs_target_percent": null,
+            "is_low_output": false,
+            "covered_minutes": 60.0,
+            "unaccounted_minutes": 0.0,
+            "not_scheduled_minutes": 60.0,
+            "stoppage_reference_missing": false,
+            "stopped_minutes": 0.0,
+            "planned_minutes": 0.0,
+            "unplanned_minutes": 0.0,
+            "stop_reasons": [
+              {
+                "kind": "not_scheduled",
+                "reason": "Not scheduled",
+                "minutes": 60.0
+              }
+            ],
+            "reconciliation": {
+              "target_packs": 0.0,
+              "actual_packs": 0.0,
+              "signed_variance_packs": 0.0,
+              "shortfall_packs": 0.0,
+              "overproduction_packs": 0.0,
+              "remaining_gap_packs": 0.0,
+              "raw_planned_packs": 0.0,
+              "raw_unplanned_packs": 0.0,
+              "allocated_planned_packs": 0.0,
+              "allocated_unplanned_packs": 0.0,
+              "excess_modelled_packs": 0.0,
+              "operating_context": [],
+              "covered_periods": 0,
+              "total_periods": 0,
+              "coverage_complete": false,
+              "reported_explanations": [],
+              "limitations": []
+            }
+          },
+          "runs": []
+        },
+        "current_issue": "Not scheduled",
+        "current_fault_id": null
+      },
+      {
+        "name": "Guill",
+        "status": "stopped",
+        "status_label": "Production stopped",
+        "tone": "danger",
+        "status_recorded_at": "2026-10-09T09:55:00+00:00",
+        "last_production_at": "2026-10-09T10:00:00+00:00",
+        "job": {
+          "run_id": 3,
+          "product": "Brown Basmati",
+          "customer": "Tesco",
+          "format": "1 kg x 10",
+          "pack_weight_kg": 1.0,
+          "speed_ppm": 80.0,
+          "completed_pallets": 15.12,
+          "remaining_pallets": 48.88,
+          "progress_percent": 23.625,
+          "estimate_hours": null,
+          "estimate_status": "Estimate unavailable"
+        },
+        "changeover": null,
+        "last_hour": {
+          "hour_start": "2026-10-09T09:00:00+00:00",
+          "hour_end": "2026-10-09T10:00:00+00:00",
+          "hour_label": "10:00\u201311:00",
+          "is_complete": true,
+          "line": {
+            "status": "reported",
+            "target_packs": 4800.0,
+            "actual_packs": 1824.0,
+            "output_vs_target_percent": 38.0,
+            "is_low_output": true,
+            "covered_minutes": 60.0,
+            "unaccounted_minutes": 0.0,
+            "not_scheduled_minutes": 0.0,
+            "stoppage_reference_missing": false,
+            "stopped_minutes": 28.0,
+            "planned_minutes": 0.0,
+            "unplanned_minutes": 28.0,
+            "stop_reasons": [
+              {
+                "kind": "unplanned",
+                "reason": "Bagger \u2014 Film tracking fault",
+                "minutes": 28.0
+              },
+              {
+                "kind": "unplanned",
+                "reason": "X-ray \u2014 Reject sensor fault",
+                "minutes": 5.0
+              }
+            ],
+            "reconciliation": {
+              "target_packs": 4800.0,
+              "actual_packs": 1824.0,
+              "signed_variance_packs": -2976.0,
+              "shortfall_packs": 2976.0,
+              "overproduction_packs": 0.0,
+              "remaining_gap_packs": 736.0,
+              "raw_planned_packs": 0.0,
+              "raw_unplanned_packs": 2240.0,
+              "allocated_planned_packs": 0.0,
+              "allocated_unplanned_packs": 2240.0,
+              "excess_modelled_packs": 0.0,
+              "operating_context": [],
+              "covered_periods": 1,
+              "total_periods": 1,
+              "coverage_complete": true,
+              "reported_explanations": [],
+              "limitations": []
+            }
+          },
+          "runs": [
+            {
+              "reconciliation": {
+                "target_packs": 4800.0,
+                "actual_packs": 1824.0,
+                "signed_variance_packs": -2976.0,
+                "shortfall_packs": 2976.0,
+                "overproduction_packs": 0.0,
+                "remaining_gap_packs": 736.0,
+                "equivalent_minutes": 9.2,
+                "prompt_required": false,
+                "scheduled_minutes": 60.0,
+                "planned_minutes": 0.0,
+                "unplanned_minutes": 28.0,
+                "raw_planned_packs": 0.0,
+                "raw_unplanned_packs": 2240.0,
+                "allocated_planned_packs": 0.0,
+                "allocated_unplanned_packs": 2240.0,
+                "excess_modelled_packs": 0.0,
+                "reported_explanation": null,
+                "operating_context": [],
+                "limitations": [],
+                "comparable": true
+              },
+              "run_id": 3,
+              "product": "Brown Basmati",
+              "customer": "Tesco",
+              "line_technician": "Liam",
+              "status": "reported",
+              "applicable_start": "2026-10-09T09:00:00+00:00",
+              "applicable_end": "2026-10-09T10:00:00+00:00",
+              "applicable_minutes": 60.0,
+              "is_partial_hour": false,
+              "target_speeds": [
+                {
+                  "from": "2026-10-09T09:00:00+00:00",
+                  "to": "2026-10-09T10:00:00+00:00",
+                  "speed_ppm": 80.0
+                }
+              ],
+              "actual_speed_ppm": 30.4,
+              "target_packs": 4800.0,
+              "actual_packs": 1824.0,
+              "output_vs_target_percent": 38.0,
+              "is_low_output": true,
+              "stopped_minutes": 28.0,
+              "planned_minutes": 0.0,
+              "unplanned_minutes": 28.0,
+              "stop_reasons": [
+                {
+                  "kind": "unplanned",
+                  "reason": "Bagger \u2014 Film tracking fault",
+                  "minutes": 28.0
+                },
+                {
+                  "kind": "unplanned",
+                  "reason": "X-ray \u2014 Reject sensor fault",
+                  "minutes": 5.0
+                }
+              ]
+            }
+          ]
+        },
+        "current_issue": "Film tracking fault",
+        "current_fault_id": 1
+      }
+    ],
+    "output_gap": {
+      "total_tonnes": 28.248,
+      "unclassified_tonnes": 28.248,
+      "recoverable_tonnes": null,
+      "delayed_tonnes": null,
+      "confirmed_unrecovered_tonnes": null,
+      "note": "Recoverability not yet assessed. Output gap is not confirmed commercial loss."
+    },
+    "downtime": {
+      "planned_minutes": 0.0,
+      "unplanned_minutes": 73.0,
+      "not_scheduled_minutes": 620.0,
+      "unplanned_percent": 100.0
+    },
+    "loss_drivers": [
+      {
+        "line": "Guill",
+        "machine": "Bagger",
+        "cause": "Film tracking fault",
+        "minutes": 48.0,
+        "events": 1,
+        "fault_ids": [
+          1
+        ],
+        "estimated_tonnes": null,
+        "investigation": "Review fault history and confirm the cause with Engineering."
+      },
+      {
+        "line": "Rovema",
+        "machine": "BV2",
+        "cause": "Vertical seal adjustment",
+        "minutes": 25.0,
+        "events": 1,
+        "fault_ids": [
+          3
+        ],
+        "estimated_tonnes": null,
+        "investigation": "Review fault history and confirm the cause with Engineering."
+      }
+    ],
+    "ranking_method": "Ranked by non-overlapping recorded stop minutes. Per-cause tonnes are not reliably attributable.",
+    "line_stops": {
+      "planned_minutes": 0.0,
+      "unplanned_minutes": 0.0,
+      "not_scheduled_minutes": 620.0,
+      "by_reason": [
+        {
+          "production_line": "GIC",
+          "downtime_type": "not_scheduled",
+          "reason": "Not scheduled",
+          "minutes": 620.0,
+          "estimated_lost_tonnes": null
+        }
+      ],
+      "note": "Stops between product runs (handover, changeover, Other and the restart delay after it) belong to the line, not to any run, so they are listed separately and are not part of the run-based downtime, gap or Estimated OEE figures. Minutes are clipped to the period; lost output uses the previous run's target speed and pack weight."
+    },
+    "data_issues": [],
+    "material_flow": [
+      {
+        "stage": "Intake",
+        "connected": false,
+        "tonnes": null
+      },
+      {
+        "stage": "Process",
+        "connected": false,
+        "tonnes": null
+      },
+      {
+        "stage": "Packaging",
+        "connected": true,
+        "tonnes": 67.752
+      },
+      {
+        "stage": "Finished Goods",
+        "connected": false,
+        "tonnes": null
+      },
+      {
+        "stage": "Dispatch",
+        "connected": false,
+        "tonnes": null
+      }
+    ],
+    "capabilities": {
+      "production_intelligence": true,
+      "financial_intelligence": false,
+      "scope": "current_factory"
+    }
+  }
+}

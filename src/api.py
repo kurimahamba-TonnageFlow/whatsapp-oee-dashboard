@@ -107,4 +107,6 @@ app.include_router(readiness_router)
 # falls through to the existing WhatsApp app unchanged.
 from .live_dashboard_api import router as live_dashboard_router
 app.include_router(live_dashboard_router)
+from .intelligence_api import router as intelligence_router
+app.include_router(intelligence_router)
 app.mount("/", whatsapp_app)
