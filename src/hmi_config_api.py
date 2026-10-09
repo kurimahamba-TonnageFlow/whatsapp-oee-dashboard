@@ -37,6 +37,7 @@ def _assemble_config_tree(rows):
                 "id": line_id,
                 "name": row["line_name"],
                 "machines": {},
+                "linetech": row.get("linetech_config") or {},
             }
             line_order.append(line_id)
 
@@ -71,6 +72,7 @@ def _assemble_config_tree(rows):
             "id": lines_by_id[line_id]["id"],
             "name": lines_by_id[line_id]["name"],
             "machines": list(lines_by_id[line_id]["machines"].values()),
+            "linetech": lines_by_id[line_id]["linetech"],
         }
         for line_id in line_order
     ]
@@ -137,6 +139,7 @@ def _open_stoppage_api(row, now):
     started_at = row["stoppage_started_at"]
     return {
         "stoppage_id": row["stoppage_id"],
+        "linetech": bool(row.get("stoppage_linetech")),
         "kind": row["stoppage_kind"],
         "reason": row.get("stoppage_reason"),
         "started_at": started_at,

@@ -303,6 +303,7 @@ def submit_hourly_update(run_id: int, payload: HourlyUpdateRequest, idempotency_
 
 
 class PlannedDowntimeStartRequest(BaseModel):
+    component: str | None = Field(default=None, min_length=1, max_length=40)
     reason: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
     started_by: str = Field(max_length=MAX_SHORT_TEXT_LENGTH)
 
@@ -349,6 +350,7 @@ def planned_downtime_api(event, now=None):
 
     return {
         "planned_downtime_id": event["id"],
+        "component": event.get("component"),
         "production_run_id": event["production_run_id"],
         "production_line": event["production_line"],
         "reason": event["reason"],
@@ -383,6 +385,7 @@ def begin_planned_downtime(run_id: int, payload: PlannedDowntimeStartRequest, id
         payload.started_by,
         _now(),
         idempotency=idempotency,
+        **({"component": payload.component} if payload.component is not None else {}),
     )
 
 
@@ -456,7 +459,7 @@ class FaultReportRequest(BaseModel):
     machine_id: int | None = Field(default=None, ge=1)
     button_id: int | None = Field(default=None, ge=1)
     note: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
-    outcome: Literal["call_engineer", "resolved"] = "call_engineer"
+    outcome: Literal["call_engineer", "resolved", "resolved_waiting_restart"] = "call_engineer"
     started_at: datetime | None = None
     restored_at: datetime | None = None
 
@@ -480,10 +483,13 @@ class FaultReportRequest(BaseModel):
     @model_validator(mode="after")
     def button_and_note_rules(self):
         if self.outcome == "resolved":
-            if self.started_at is None or self.restored_at is None or not self.note:
-                raise ValueError("Resolved downtime needs start time, restart time and repair details.")
+            if self.started_at is None or self.restored_at is None:
+                raise ValueError("Resolved downtime needs start time and confirmed restart time.")
             if self.restored_at < self.started_at:
                 raise ValueError("Restart cannot be before the stop started.")
+        elif self.outcome == "resolved_waiting_restart":
+            if self.started_at is None or self.restored_at is not None:
+                raise ValueError("A repaired fault awaiting restart needs a start time and no restart time.")
         elif self.started_at is not None or self.restored_at is not None:
             raise ValueError("Use the resolved option to report an already completed stop.")
         if self.button_id is not None and self.machine_id is None:
@@ -499,6 +505,7 @@ def fault_report_api(created):
     return {
         "status": "success",
         "downtime_event_id": created["id"],
+        "linetech_resolved_at": created.get("linetech_resolved_at"),
         "production_run_id": created["production_run_id"],
         "production_line": created["production_line"],
         "fault_id": created["fault_id"],
@@ -1093,6 +1100,7 @@ def change_operating_speed(run_id: int, payload: OperatingSpeedChangeRequest, id
 
 
 class LineStoppageStartRequest(BaseModel):
+    changeover_selection: dict | None = None
     casepacker_required: bool = False
     casepacker_details: str | None = Field(default=None, max_length=500)
     kind: Literal["changeover", "other", "handover", "not_scheduled"]
@@ -1111,6 +1119,11 @@ class LineStoppageStartRequest(BaseModel):
 
     @model_validator(mode="after")
     def other_needs_a_reason(self):
+        if self.changeover_selection is not None:
+            from .linetech import ChangeoverSelection
+            if self.kind != "changeover":
+                raise ValueError("Changeover selection requires a changeover stop.")
+            self.changeover_selection = ChangeoverSelection.model_validate(self.changeover_selection).model_dump()
         if self.kind == "other" and not self.reason:
             raise ValueError("Write the reason the line is stopped.")
         if self.casepacker_required:
@@ -1225,6 +1238,7 @@ def begin_line_stoppage(production_line: str, payload: LineStoppageStartRequest,
         _now(),
         *([payload.casepacker_details] if payload.casepacker_required else []),
         idempotency=idempotency,
+        **({"changeover_selection": payload.changeover_selection} if payload.changeover_selection is not None else {}),
     )
 
 

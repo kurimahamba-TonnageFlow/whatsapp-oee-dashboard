@@ -29,6 +29,7 @@ export interface HmiConfigMachine {
 }
 
 export interface HmiConfigLine {
+  linetech?: import("../features/hmi/linetech").LineTechConfig
   id: number
   name: string
   machines: HmiConfigMachine[]

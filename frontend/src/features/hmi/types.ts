@@ -93,6 +93,7 @@ export interface RunStateProgress {
 }
 
 export interface PlannedDowntimeEvent {
+  component?: string | null
   planned_downtime_id: number
   production_run_id: number
   production_line: string
@@ -211,6 +212,7 @@ export interface RunState {
 export type LineStoppageKind = 'changeover' | 'other' | 'handover' | 'restart_delay' | 'not_scheduled'
 
 export interface OpenLineStoppage {
+  linetech?: boolean
   stoppage_id: number
   kind: LineStoppageKind
   reason: string | null
@@ -222,6 +224,7 @@ export interface OpenLineStoppage {
 }
 
 export interface LineStoppageResponse {
+  changeover?: {workflow?: import("./linetech").ChangeoverWorkflow | null} | null
   status: string
   stoppage_id: number
   production_line: string
@@ -245,6 +248,7 @@ export interface LineStoppageResponse {
 }
 
 export interface LineStoppageStartPayload {
+  changeover_selection?: import("./linetech").ChangeoverSelection
   casepacker_required?: boolean
   casepacker_details?: string | null
   /** A Restart delay is only ever started by Resolve, never by hand. */
@@ -370,6 +374,7 @@ export interface HourlyUpdateResponse {
 }
 
 export interface PlannedDowntimeStartPayload {
+  component?: string
   reason: string
   started_by: string
 }
@@ -381,7 +386,7 @@ export interface PlannedDowntimeEndPayload {
 export type PlannedDowntimeResponse = PlannedDowntimeEvent & { status: string }
 
 export interface FaultReportPayload {
-  outcome?: 'call_engineer' | 'resolved'
+  outcome?: 'call_engineer' | 'resolved' | 'resolved_waiting_restart'
   started_at?: string
   restored_at?: string
   reported_by: string
@@ -393,6 +398,7 @@ export interface FaultReportPayload {
 }
 
 export interface FaultReportResponse {
+  linetech_resolved_at?: string | null
   status: string
   downtime_event_id: number
   production_run_id: number

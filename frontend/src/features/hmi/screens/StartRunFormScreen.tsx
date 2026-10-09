@@ -1,3 +1,4 @@
+import type { LineTechConfig } from '../linetech'
 import { parsePackFormat } from '../packWeight'
 import { StandardPreview } from '../components/StandardPreview'
 import type { FormEvent } from 'react'
@@ -7,6 +8,7 @@ import type { StartRunFormErrors } from '../validation'
 import type { StartRunFormValues } from '../types'
 
 interface StartRunFormScreenProps {
+  linetech?: LineTechConfig
   values: StartRunFormValues
   errors: StartRunFormErrors
   onChange: (field: keyof StartRunFormValues, value: string) => void
@@ -18,6 +20,7 @@ interface StartRunFormScreenProps {
 }
 
 export function StartRunFormScreen({
+  linetech,
   values,
   errors,
   onChange,
@@ -88,7 +91,7 @@ export function StartRunFormScreen({
             Product
             <select value={values.product} onChange={(e) => onChange('product', e.target.value)}>
               <option value="">Select…</option>
-              {PRODUCTS.map((product) => (
+              {(linetech?.enabled ? linetech.products : PRODUCTS).map((product) => (
                 <option key={product} value={product}>
                   {product}
                 </option>
@@ -99,21 +102,21 @@ export function StartRunFormScreen({
 
           <label className="hmi-field">
             Pack weight (e.g. 1kg, 500g)
-            <input
+            {linetech?.enabled && linetech.sizes.length ? <select value={values.packWeightKg ? String(Number(values.packWeightKg)) : ''} onChange={e=>onChange('packWeightLabel',e.target.value ? `${e.target.value}kg` : '')}><option value="">Select size</option>{linetech.sizes.map(size=><option key={size} value={String(Number(size))}>{size} kg</option>)}</select> : <input
               type="text"
               value={values.packWeightLabel}
               onChange={(e) => onChange('packWeightLabel', e.target.value)}
-            />
+            />}
             <FieldError message={errors.packWeightLabel || errors.packWeightKg} />
           </label>
 
           <label className="hmi-field">
             Format (e.g. 1 kg × 8, 1×10)
-            <input
+            {linetech?.enabled && linetech.formats.length ? <select value={values.packType} onChange={e=>onChange('packType',e.target.value)}><option value="">Select format</option>{linetech.formats.map(format=><option key={format}>{format}</option>)}</select> : <input
               type="text"
               value={values.packType}
               onChange={(e) => onChange('packType', e.target.value)}
-            />
+            />}
             <FieldError message={errors.packType || (values.packType ? parsePackFormat(values.packType, values.packWeightLabel).error ?? errors.packsPerCase : errors.packsPerCase)} />
           </label>
 

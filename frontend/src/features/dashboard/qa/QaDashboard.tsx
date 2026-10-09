@@ -19,7 +19,7 @@ import { DateField, FilterBar, SelectField } from '../ui/filters'
 import { MetricCard, MetricGrid } from '../ui/MetricCard'
 import { PageHeader } from '../ui/PageHeader'
 import { Panel } from '../ui/Panel'
-import { EmptyState, ErrorState, LoadingState, NotAvailable, RefreshFailed } from '../ui/states'
+import { EmptyState, ErrorState, LoadingState, RefreshFailed } from '../ui/states'
 import { StatusBadge } from '../ui/StatusBadge'
 
 /** Five production weeks, so the weekly trend has something to compare. */
@@ -72,6 +72,8 @@ function Change({ from, to, format = (value) => String(value) }: {
 }
 
 const LOG_COLUMNS: Column<Changeover>[] = [
+  {header:'Type',render:row=>row.workflow?.kind ?? 'Not recorded'},
+  {header:'Verification',render:row=>row.workflow?.cancelled_at ? 'Cancelled' : row.workflow?.verification ? `${row.workflow.verification.technician} ? ${row.workflow.verification.reference}` : row.workflow ? 'Awaiting verification' : 'Not recorded'},
   { header: 'Started', render: (row) => formatDateTime(row.started_at) },
   { header: 'Line', render: (row) => row.production_line },
   { header: 'Technician', render: (row) => row.line_technician },
@@ -106,7 +108,7 @@ const LOG_COLUMNS: Column<Changeover>[] = [
   },
   {
     header: 'Status',
-    render: (row) => <StatusBadge tone={row.status === 'Open' ? 'warn' : 'good'}>{row.status}</StatusBadge>,
+    render: (row) => <StatusBadge tone={row.status === 'Open' ? 'warn' : 'good'}>{row.workflow?.cancelled_at ? (row.status === 'Open' ? 'Cancelled — stop still open' : 'Cancelled') : row.status}</StatusBadge>,
   },
 ]
 
@@ -241,7 +243,8 @@ function QaBody({ data }: { data: QaReport }) {
         <MetricCard
           icon="◇"
           label="Product / customer / format split"
-          unavailable="Changeovers are not classified by type yet."
+          value={log.filter(r=>!!r.workflow).length}
+          detail="Changeovers with a recorded type; legacy rows remain unclassified."
         />
       </MetricGrid>
 
@@ -301,16 +304,11 @@ function QaBody({ data }: { data: QaReport }) {
 
         <div className="pd-stack">
           <Panel title="QA status">
-            <NotAvailable needed="a QA check / sign-off recorded against each changeover (a new field and endpoint - a schema change, not built)">
-              Pulse does not record a QA check or sign-off for changeovers yet, so no pass, fail or pending
-              status can be shown.
-            </NotAvailable>
+            <p>{log.filter(r=>r.workflow?.qa_status==='verified').length} changeovers have recorded verification. The log identifies who recorded it and the QA reference.</p><p>Legacy records have no recorded verification. Pulse does not infer a passed check from Engineering completion.</p>
           </Panel>
           <Panel title="Changeovers by type">
-            <NotAvailable needed="a changeover type (product / customer / format / pack weight) on each /changeovers row, classified in the backend">
-              Previous and new values are recorded (see the log), but the type of each changeover is not
-              classified yet.
-            </NotAvailable>
+            {(['product','format','size'] as const).map(kind=><p key={kind}>{kind}: {log.filter(r=>r.workflow?.kind===kind).length}</p>)}
+            <p>Not classified: {log.filter(r=>!r.workflow).length}</p>
           </Panel>
         </div>
       </div>

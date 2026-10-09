@@ -1,3 +1,6 @@
+import './linetech.css'
+import { LineTechStoppageScreen } from './screens/LineTechStoppageScreen'
+import type { ChangeoverSelection } from './linetech'
 import { parsePackFormat } from './packWeight'
 import { getCasepackerStatus } from '../engineering/casepackerApi'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -123,6 +126,7 @@ interface HandoverState {
 function stoppageFromResponse(response: LineStoppageResponse): ActiveLineStoppage {
   return {
     stoppageId: response.stoppage_id,
+    linetech: !!response.changeover?.workflow,
     productionLine: response.production_line,
     kind: response.kind,
     reason: response.reason,
@@ -478,13 +482,13 @@ export function HmiScreen() {
   // End Run -> End Shift / Changeover / Other
   // ------------------------------------------------------------
 
-  function startStoppage(kind: Exclude<LineStoppageKind, 'restart_delay'>, reason: string | null = null, casepackerRequired = false, casepackerDetails = '') {
+  function startStoppage(kind: Exclude<LineStoppageKind, 'restart_delay'>, reason: string | null = null, casepackerRequired = false, casepackerDetails = '', changeoverSelection?: ChangeoverSelection) {
     if (!endedRun || isSubmitting) return
     setEndRunError(null)
     lineWrite(`stoppage:${endedRun.productionLine}:${kind}`, (key) =>
       startLineStoppage(
         endedRun.productionLine,
-        { kind, started_by: endedRun.technician, reason, ...(kind === 'changeover' ? { casepacker_required: casepackerRequired, casepacker_details: casepackerRequired ? casepackerDetails : null } : {}) },
+        { kind, started_by: endedRun.technician, reason, ...(changeoverSelection ? {changeover_selection:changeoverSelection} : {}), ...(kind === 'changeover' ? { casepacker_required: casepackerRequired, casepacker_details: casepackerRequired ? casepackerDetails : null } : {}) },
         key,
       ),
     )
@@ -504,6 +508,7 @@ export function HmiScreen() {
     if (!stop) return
     setActiveStoppage({
       stoppageId: stop.stoppage_id,
+      linetech: stop.linetech,
       productionLine: line.production_line,
       kind: stop.kind,
       reason: stop.reason,
@@ -539,11 +544,12 @@ export function HmiScreen() {
       .then((response) => {
         // Resolve on an Other stop: the Restart delay takes over at once.
         const stop = stoppageFromResponse(response.restart_delay ?? response)
+        stop.linetech = activeStoppage.linetech
         setActiveStoppage(stop)
         void refreshLineState()
         // End Changeover: the physical work is done. The event keeps
         // running through the new-run form and stops when the run starts.
-        if (stop.kind === 'changeover') {
+        if (stop.kind === 'changeover' && !stop.linetech) {
           void getCasepackerStatus(stop.stoppageId).then(({ request }) => {
             if (!request || request.ready_at) handleStartRunFromHome(stop.productionLine, endedBy)
           }).catch(() => setStoppageError('Changeover work recorded. Could not check Engineering readiness; refresh before starting.'))
@@ -636,6 +642,7 @@ export function HmiScreen() {
         pack_weight_kg: Number(formValues.packWeightKg),
         packs_per_case: Number(formValues.packsPerCase),
         pack_type: formValues.packType,
+        ...((configState.status === "ready" && configState.lines.find(l=>l.name===formValues.productionLine)?.linetech?.enabled) || formLineState?.open_stoppage?.linetech ? {format: formValues.packType} : {}),
         cases_per_pallet: Number(formValues.casesPerPallet),
         pallets_remaining: Number(formValues.palletsRemaining),
         previous_run_completed: Number(formValues.previousRunCompleted || '0'),
@@ -717,14 +724,14 @@ export function HmiScreen() {
   // Planned downtime
   // ------------------------------------------------------------
 
-  function beginPlannedDowntime(reason: string) {
+  function beginPlannedDowntime(reason: string, component?: string) {
     if (!storedRun || !runState || isSubmitting) return
     setPlannedDowntimeError(null)
 
-    runWrite('plannedDowntimeStart', `Starting ${reason} planned downtime`, { reason }, (key) =>
+    runWrite('plannedDowntimeStart', `Starting ${reason} planned downtime`, { reason, ...(component ? {component} : {}) }, (key) =>
       startPlannedDowntime(
         storedRun.runId,
-        { reason, started_by: runState.run.line_technician },
+        { reason, started_by: runState.run.line_technician, ...(component ? {component} : {}) },
         key,
       ),
     )
@@ -832,6 +839,7 @@ export function HmiScreen() {
     reason: string
     note: string
     startedAt?: string
+    awaitingRestart?: boolean
     restoredAt?: string
   }) {
     if (!storedRun || !runState || isSubmitting) return
@@ -844,6 +852,7 @@ export function HmiScreen() {
       machine_id: input.machineId,
       button_id: input.buttonId,
       note: input.note || null,
+      ...(input.awaitingRestart ? {outcome: 'resolved_waiting_restart' as const, started_at: input.startedAt} : {}),
       ...(input.restoredAt ? { outcome: 'resolved' as const, started_at: input.startedAt, restored_at: input.restoredAt } : {}),
     }
 
@@ -1064,6 +1073,7 @@ export function HmiScreen() {
     case 'startRun':
       return (
         <StartRunFormScreen
+          linetech={configState.status === "ready" ? configState.lines.find(l=>l.name===formValues.productionLine)?.linetech : undefined}
           timerNotice={timerNotice}
           values={formValues}
           errors={formErrors}
@@ -1092,6 +1102,7 @@ export function HmiScreen() {
     case 'activeRun':
       return (
         <ActiveRunScreen
+          linetechEnabled={configState.status === "ready" && configState.lines.find(l=>l.name===runState!.run.production_line)?.linetech?.enabled}
           state={runState!}
           isRefreshing={isRefreshing}
           refreshError={refreshError}
@@ -1145,6 +1156,8 @@ export function HmiScreen() {
     case 'endRunNext':
       return (
         <EndRunNextScreen
+          linetechEnabled={configState.status === "ready" && configState.lines.find(l=>l.name===endedRun?.productionLine)?.linetech?.enabled}
+          onLineTechChangeover={selection=>startStoppage("changeover",null,false,"",selection)}
           productionLine={endedRun?.productionLine ?? ''}
           technician={endedRun?.technician ?? ''}
           endedAt={endedRun?.finishedAt ?? null}
@@ -1162,6 +1175,10 @@ export function HmiScreen() {
         setScreen('home')
         return null
       }
+      if (activeStoppage.kind === 'changeover' && activeStoppage.linetech) return <LineTechStoppageScreen
+        stoppage={activeStoppage} isSubmitting={isSubmitting} errorMessage={stoppageError} onEnd={finishStoppage}
+        onStartNewRun={()=>{const {productionLine,startedBy}=activeStoppage;setActiveStoppage(null);handleStartRunFromHome(productionLine,startedBy??'')}}
+        onHome={()=>{setActiveStoppage(null);void refreshLineState();setScreen('home')}}/>
       return (
         <LineStoppageScreen
           stoppage={activeStoppage}
@@ -1236,6 +1253,7 @@ export function HmiScreen() {
     case 'plannedDowntime':
       return (
         <PlannedDowntimeScreen
+          configuredReasons={configState.status === "ready" ? configState.lines.find(l=>l.name===runState!.run.production_line)?.linetech : undefined}
           reasons={[...PLANNED_DOWNTIME_REASONS]}
           activeEvent={runState!.open_planned_downtime}
           isSubmitting={isSubmitting}
@@ -1281,6 +1299,7 @@ export function HmiScreen() {
           : undefined
       return (
         <ReportToEngineerScreen
+          linetech={configLine?.linetech}
           productionLine={runState!.run.production_line}
           machines={configLine?.machines ?? []}
           isSubmitting={isSubmitting}

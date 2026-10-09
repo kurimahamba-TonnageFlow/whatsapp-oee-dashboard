@@ -7,6 +7,7 @@ import type { PendingAction } from '../idempotency'
 import type { RunState } from '../types'
 
 interface ActiveRunScreenProps {
+  linetechEnabled?: boolean
   state: RunState
   isRefreshing: boolean
   refreshError: string | null
@@ -43,6 +44,7 @@ function liveMinutes(serverMinutes: number | null, generatedAt: string, now: Dat
 }
 
 export function ActiveRunScreen({
+  linetechEnabled,
   state,
   isRefreshing,
   refreshError,
@@ -115,6 +117,12 @@ export function ActiveRunScreen({
                 : 'No data yet'}
         </StatusPill>
       </header>
+      {linetechEnabled && <div className="hmi-button-grid linetech-main-actions" aria-label="Record a stop">
+        <button className="linetech-tile linetech-planned" onClick={onPlannedDowntime}>PLANNED DOWNTIME<small>Film, labels and routine checks</small></button>
+        <button className="linetech-tile linetech-unplanned" onClick={onReportToEngineer}>UNPLANNED DOWNTIME<small>Resolve a fault or call Engineering</small></button>
+        <button className="linetech-tile linetech-changeover" onClick={onCompleteRun}>CHANGEOVER<small>End Run, then Product, Format or Size</small></button>
+      </div>}
+
 
       {pendingAction && (
         <div className="hmi-inline-warning" role="alert">
@@ -267,12 +275,8 @@ export function ActiveRunScreen({
         <button type="button" className="hmi-primary-button" onClick={onHourlyUpdate}>
           {dueHours.length > 1 ? `Report Hours (${dueHours.length})` : 'Report Hour'}
         </button>
-        <button type="button" className="hmi-secondary-button" onClick={onPlannedDowntime}>
-          Planned Downtime
-        </button>
-        <button type="button" className="hmi-danger-button" onClick={onReportToEngineer}>
-          Report to Engineer
-        </button>
+        {!linetechEnabled && <><button type="button" className="hmi-secondary-button" onClick={onPlannedDowntime}>Planned Downtime</button>
+        <button type="button" className="hmi-danger-button" onClick={onReportToEngineer}>Report to Engineer</button></>}
         {onChangeTargetSpeed && (
           <button type="button" className="hmi-secondary-button" onClick={onChangeTargetSpeed}>
             Record Operating Speed

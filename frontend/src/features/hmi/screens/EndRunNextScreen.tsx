@@ -1,6 +1,10 @@
+import { LineTechChangeoverScreen } from './LineTechChangeoverScreen'
+import type { ChangeoverSelection } from '../linetech'
 import { useState } from 'react'
 
 interface EndRunNextScreenProps {
+  linetechEnabled?: boolean
+  onLineTechChangeover?: (selection: ChangeoverSelection) => void
   productionLine: string
   technician: string
   /** Choosing later (from Home): the event covers the time since then. */
@@ -16,6 +20,8 @@ interface EndRunNextScreenProps {
 /** After End Run: the run's output clock has stopped. What happens next
  * on the line decides what is recorded against it. */
 export function EndRunNextScreen({
+  linetechEnabled,
+  onLineTechChangeover,
   productionLine,
   technician,
   endedAt = null,
@@ -32,6 +38,8 @@ export function EndRunNextScreen({
   const [otherOpen, setOtherOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [reasonError, setReasonError] = useState<string | null>(null)
+
+  if (changeoverOpen && linetechEnabled && onLineTechChangeover) return <LineTechChangeoverScreen line={productionLine} isSubmitting={isSubmitting} errorMessage={errorMessage} onConfirm={onLineTechChangeover} onBack={()=>setChangeoverOpen(false)}/>
 
   return (
     <div className="hmi-screen hmi-end-run-next">

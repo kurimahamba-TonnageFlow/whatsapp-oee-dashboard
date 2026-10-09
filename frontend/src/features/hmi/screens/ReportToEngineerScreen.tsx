@@ -1,9 +1,12 @@
+import { LineTechFaultScreen } from './LineTechFaultScreen'
+import type { LineTechConfig } from '../linetech'
 import { faultSection, isSbsMachine, sbsEquipmentLabel } from '../faultSections'
 import { useState } from 'react'
 import type { HmiConfigMachine } from '../../../types/api'
 import type { FaultReportPayload, FaultReportResponse } from '../types'
 
 interface ReportToEngineerScreenProps {
+  linetech?: LineTechConfig
   productionLine: string
   machines: HmiConfigMachine[]
   isSubmitting: boolean
@@ -16,6 +19,7 @@ interface ReportToEngineerScreenProps {
     reason: string
     note: string
     startedAt?: string
+    awaitingRestart?: boolean
     restoredAt?: string
   }) => void
   pendingReport?: FaultReportPayload | null
@@ -25,6 +29,7 @@ interface ReportToEngineerScreenProps {
 }
 
 export function ReportToEngineerScreen({
+  linetech,
   productionLine,
   machines,
   isSubmitting,
@@ -55,6 +60,7 @@ export function ReportToEngineerScreen({
         <p>
           {result.production_status === 'Resolved'
             ? `Fault ${result.fault_id} on ${result.machine} was resolved by the line technician. No Engineering call was created.`
+            : result.linetech_resolved_at ? `The repair is recorded. Production downtime remains open until you confirm restart. No Engineering call was created.`
             : `Fault ${result.fault_id} on ${result.machine} is now with Engineering (${result.engineering_status}).`}
         </p>
         <div className="hmi-form-actions">
@@ -86,6 +92,8 @@ export function ReportToEngineerScreen({
       </div>
     </div>
   }
+
+  if (linetech?.enabled) return <LineTechFaultScreen config={linetech} machines={machines} isSubmitting={isSubmitting} errorMessage={errorMessage} onSubmit={onSubmit} onCancel={onCancel}/>
 
   const selectedMachine = machines.find((m) => m.name === machine)
   const faultButtons =

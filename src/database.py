@@ -102,7 +102,8 @@ def check_schema_readiness():
             (to_regclass('public.task_observations') IS NOT NULL
              AND to_regprocedure('public.canonical_product(text)') IS NOT NULL
              AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='immutable_task_observation' AND NOT tgisinternal)) AS tasks,
-            to_regprocedure('public.resolve_production_standard(text,numeric,text,text,integer,integer,timestamp with time zone)') IS NOT NULL AS line_weight_standard;
+            to_regprocedure('public.resolve_production_standard(text,numeric,text,text,integer,integer,timestamp with time zone)') IS NOT NULL AS line_weight_standard,
+            EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='changeovers' AND column_name='workflow') AS linetech;
     """
 
     with psycopg.connect(DATABASE_URL, connect_timeout=5) as connection:
@@ -121,6 +122,7 @@ def check_schema_readiness():
         "20261005135527": bool(row.get("management_standard")),
         "20261006021758": bool(row.get("tasks")),
         "20261008232014": bool(row.get("line_weight_standard")),
+        "20261009110303": bool(row.get("linetech")),
     }
 
 
@@ -1695,6 +1697,7 @@ def get_public_hmi_config():
         SELECT
             pl.id AS line_id,
             pl.name AS line_name,
+            pl.linetech_config,
             pl.display_order AS line_display_order,
             m.id AS machine_id,
             m.name AS machine_name,
@@ -1793,6 +1796,7 @@ def get_hmi_line_state():
             ) AS line_open_fault_count,
             ls.id         AS stoppage_id,
             ls.kind       AS stoppage_kind,
+            EXISTS(SELECT 1 FROM public.changeovers ch WHERE ch.line_stoppage_id=ls.id AND ch.workflow IS NOT NULL) AS stoppage_linetech,
             ls.reason     AS stoppage_reason,
             ls.started_at AS stoppage_started_at,
             ls.started_by AS stoppage_started_by,
@@ -2952,11 +2956,19 @@ def record_hourly_update(
     return result
 
 
-def start_planned_downtime(production_run_id, reason, started_by, started_at, idempotency=None):
+def start_planned_downtime(production_run_id, reason, started_by, started_at, idempotency=None, component=None):
     with get_database_connection() as connection:
         with connection.cursor(row_factory=dict_row) as cursor:
             _claim_idempotency(cursor, connection, idempotency, production_run_id)
             run = _lock_active_run(cursor, connection, production_run_id)
+            if component is not None:
+                cursor.execute("SELECT linetech_config FROM public.production_lines WHERE name=%s", (run["production_line"],))
+                configured = cursor.fetchone()
+                config = configured["linetech_config"] if configured else {}
+                choices = [p for p in config.get("planned", []) if p.get("active", True) and p["reason"] == reason]
+                if not config.get("enabled") or not choices or component not in choices[0].get("components", []):
+                    raise PulseCaptureError(422, "Select a configured planned-stop component.")
+
 
             cursor.execute(
                 """
@@ -2974,19 +2986,19 @@ def start_planned_downtime(production_run_id, reason, started_by, started_at, id
             cursor.execute(
                 """
                 INSERT INTO public.planned_downtime_events (
-                    production_run_id, production_line, reason, started_by, started_at
+                    production_run_id, production_line, reason, started_by, started_at, component
                 )
                 VALUES (
                     %(production_run_id)s, %(production_line)s, %(reason)s,
-                    %(started_by)s, %(started_at)s
+                    %(started_by)s, %(started_at)s, %(component)s
                 )
-                RETURNING id, production_run_id, production_line, reason,
+                RETURNING id, production_run_id, production_line, reason, component,
                           started_by, started_at, ended_by, ended_at, duration_minutes;
                 """,
                 {
                     "production_run_id": production_run_id,
                     "production_line": run["production_line"],
-                    "reason": reason,
+                    "reason": reason, "component": component,
                     "started_by": started_by,
                     "started_at": started_at,
                 },
@@ -3055,7 +3067,7 @@ def end_planned_downtime(planned_downtime_event_id, ended_by, ended_at, idempote
                     ended_by = %(ended_by)s,
                     duration_minutes = %(duration_minutes)s
                 WHERE id = %(id)s AND ended_at IS NULL
-                RETURNING id, production_run_id, production_line, reason,
+                RETURNING id, production_run_id, production_line, reason, component,
                           started_by, started_at, ended_by, ended_at, duration_minutes;
                 """,
                 {
@@ -3087,14 +3099,15 @@ def report_fault_to_engineering(production_run_id, report, opened_at, idempotenc
 
             machine_name = report["machine"]
             reason = report["reason"]
-            self_resolved = report.get("outcome") == "resolved"
+            self_resolved = report.get("outcome") in ("resolved", "resolved_waiting_restart")
             restart = report.get("restored_at") if self_resolved else None
             event_start = report.get("started_at") if self_resolved else opened_at
             if self_resolved and (
-                event_start is None or restart is None or not report.get("note")
-                or event_start < run["started_at"] or restart < event_start or restart > opened_at
+                event_start is None or event_start < run["started_at"] or event_start > opened_at
+                or (report.get("outcome") == "resolved" and restart is None)
+                or (restart is not None and (restart < event_start or restart > opened_at))
             ):
-                raise PulseCaptureError(422, "Downtime must be within this run and finish no later than now, with repair details.")
+                raise PulseCaptureError(422, "Downtime must be within this run and finish no later than now.")
 
             if report.get("machine_id") is not None:
                 cursor.execute(
@@ -3160,16 +3173,16 @@ def report_fault_to_engineering(production_run_id, report, opened_at, idempotenc
                     production_run_id, fault_id, machine, machine_id, button_id,
                     reason, reported_by, engineer_called, production_status,
                     engineering_status, engineer, retrospective, opened_at,
-                    resolved_at, reported_via, report_note
+                    resolved_at, reported_via, report_note, linetech_resolved_at
                 )
                 VALUES (
                     %(production_run_id)s, %(fault_id)s, %(machine)s, %(machine_id)s,
                     %(button_id)s, %(reason)s, %(reported_by)s, %(engineer_called)s, %(production_status)s,
                     'Not Started', NULL, %(retrospective)s, %(opened_at)s, %(resolved_at)s, 'react_hmi',
-                    %(note)s
+                    %(note)s, %(linetech_resolved_at)s
                 )
                 RETURNING id, production_run_id, fault_id, machine, reason,
-                          reported_by, production_status, engineering_status, opened_at;
+                          reported_by, production_status, engineering_status, opened_at, linetech_resolved_at;
                 """,
                 {
                     "production_run_id": production_run_id,
@@ -3182,7 +3195,8 @@ def report_fault_to_engineering(production_run_id, report, opened_at, idempotenc
                     "opened_at": event_start,
                     "resolved_at": restart,
                     "engineer_called": not self_resolved,
-                    "production_status": "Resolved" if self_resolved else "Ongoing",
+                    "production_status": "Resolved" if restart else "Ongoing",
+                    "linetech_resolved_at": opened_at if self_resolved else None,
                     "retrospective": self_resolved,
                     "note": report.get("note"),
                 },
@@ -3448,11 +3462,11 @@ _CHANGEOVER_COLUMNS = """
     completed_at, completed_by, duration_minutes, previous_production_run_id,
     planned_downtime_event_id, previous_customer, previous_product,
     previous_pack_weight_kg, previous_format, new_production_run_id,
-    new_customer, new_product, new_pack_weight_kg, new_format, note
+    new_customer, new_product, new_pack_weight_kg, new_format, note, workflow
 """
 
 _PLANNED_DOWNTIME_COLUMNS = """
-    id, production_run_id, production_line, reason, started_by, started_at,
+    id, production_run_id, production_line, reason, component, started_by, started_at,
     ended_by, ended_at, duration_minutes
 """
 
@@ -3825,6 +3839,8 @@ def create_production_run(run, idempotency=None):
                 connection.rollback()
                 if error.diag.constraint_name == 'management_standard_required':
                     raise PulseCaptureError(409, 'Management must configure a standard for this line, product and pack configuration before starting a run.') from error
+                if error.diag.constraint_name in ('linetech_ready_before_run', 'linetech_configuration_match'):
+                    raise PulseCaptureError(409, str(error.diag.message_primary)) from error
                 if error.diag.constraint_name == 'casepacker_ready_before_run':
                     raise PulseCaptureError(409, 'Engineering must mark the casepacker ready before starting a run.') from error
                 raise
@@ -3948,7 +3964,7 @@ def _latest_finished_run(cursor, production_line):
     cursor.execute(
         """
         SELECT id, finished_at, target_speed_ppm, line_technician, customer, product,
-               pack_weight_kg, format
+               pack_weight_kg, COALESCE(format, pack_type) AS format
         FROM public.production_runs
         WHERE production_line = %(production_line)s
           AND status <> 'Active'
@@ -3998,7 +4014,7 @@ def _require_line_ready_for_new_run(cursor, connection, production_line):
         f"""
         SELECT {_LINE_STOPPAGE_COLUMNS},
                EXISTS (SELECT 1 FROM public.casepacker_requests q
-                       WHERE q.line_stoppage_id = line_stoppages.id AND q.ready_at IS NULL) AS casepacker_pending
+                       WHERE q.line_stoppage_id = line_stoppages.id AND q.ready_at IS NULL AND q.cancelled_at IS NULL) AS casepacker_pending
         FROM public.line_stoppages
         WHERE production_line = %(production_line)s AND ended_at IS NULL
         FOR UPDATE;
@@ -4082,7 +4098,7 @@ def _link_stoppages_to_new_run(cursor, run, new_run_id, previous_run_id):
         )
 
 
-def start_line_stoppage(production_line, kind, reason, started_by, started_at, casepacker_details=None, idempotency=None):
+def start_line_stoppage(production_line, kind, reason, started_by, started_at, casepacker_details=None, idempotency=None, changeover_selection=None):
     """End Shift (Handover), Changeover, Other or Not scheduled, chosen after End Run -
     by the technician on the HMI, or later by a manager. Only while the
     line has no active run; at most one open per line; ONE choice per
@@ -4200,6 +4216,18 @@ def start_line_stoppage(production_line, kind, reason, started_by, started_at, c
                         },
                     )
                     changeover = cursor.fetchone()
+                    if changeover_selection:
+                        from .linetech import prepare_changeover
+                        cursor.execute("SELECT linetech_config FROM public.production_lines WHERE name=%s", (production_line,))
+                        config_row = cursor.fetchone()
+                        try:
+                            workflow = prepare_changeover(config_row["linetech_config"] if config_row else {}, changeover_selection, previous)
+                        except ValueError as error:
+                            raise PulseCaptureError(422, str(error)) from error
+                        cursor.execute("UPDATE public.changeovers SET workflow=%s WHERE id=%s", (Json(workflow), changeover["id"]))
+                        changeover["workflow"] = workflow
+                        casepacker_details = (f"{workflow['kind'].title()} changeover: {workflow['previous_value']} -> {workflow['next_value']}"
+                                              if workflow["engineering_required"] else None)
                     if casepacker_details:
                         cursor.execute(
                             """INSERT INTO public.casepacker_requests
@@ -5207,12 +5235,13 @@ def get_casepacker_requests(stoppage_id=None):
     with get_database_connection() as connection:
         with connection.cursor(row_factory=dict_row) as cursor:
             cursor.execute("""
-                SELECT q.*, s.production_line, s.previous_production_run_id,
+                SELECT q.*, c.workflow AS changeover_workflow, s.production_line, s.previous_production_run_id,
                        s.next_production_run_id,
                        COALESCE((SELECT jsonb_agg(to_jsonb(u) ORDER BY u.id)
                          FROM public.casepacker_updates u WHERE u.request_id=q.id), '[]'::jsonb) AS updates
                 FROM public.casepacker_requests q
                 JOIN public.line_stoppages s ON s.id=q.line_stoppage_id
+                LEFT JOIN public.changeovers c ON c.line_stoppage_id=s.id
                 WHERE (CAST(%(stop)s AS bigint) IS NULL OR q.line_stoppage_id=%(stop)s)
                   AND (CAST(%(stop)s AS bigint) IS NOT NULL OR s.next_production_run_id IS NULL)
                 ORDER BY q.requested_at, q.id;
@@ -5228,13 +5257,15 @@ def update_casepacker_request(request_id, action, engineer, note, moment, idempo
             request = cursor.fetchone()
             if request is None:
                 raise PulseCaptureError(404, 'Casepacker request not found.')
+            if request.get('cancelled_at') is not None:
+                raise PulseCaptureError(409, 'This changeover was cancelled.')
             if request['ready_at'] is not None:
                 raise PulseCaptureError(409, 'The casepacker has already been marked ready.')
             if action == 'accept':
                 if request['engineer'] is not None:
                     raise PulseCaptureError(409, 'This changeover request has already been accepted.')
-                cursor.execute('UPDATE public.casepacker_requests SET engineer=%s, accepted_at=%s WHERE id=%s',
-                               (engineer, moment, request_id))
+                cursor.execute('UPDATE public.casepacker_requests SET engineer=%s, accepted_at=%s, first_accepted_at=COALESCE(first_accepted_at,%s) WHERE id=%s',
+                               (engineer, moment, moment, request_id))
             elif action in ('update', 'ready', 'handover'):
                 if request['engineer'] != engineer:
                     raise PulseCaptureError(409, 'Only the engineer who accepted this request can update, hand over or mark it ready.')

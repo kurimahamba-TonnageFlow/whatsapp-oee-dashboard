@@ -1,6 +1,9 @@
 import { apiClient } from '../../api/client'
 
 export interface CasepackerRequest {
+  changeover_workflow?: import("../hmi/linetech").ChangeoverWorkflow | null
+  cancelled_at?: string | null
+  first_accepted_at?: string | null
   id: number
   line_stoppage_id: number
   production_line: string

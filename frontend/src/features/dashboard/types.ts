@@ -302,6 +302,7 @@ export interface DashboardFaultsResponse {
 export type ChangeoverGroupBy = 'line' | 'week' | 'day' | 'month' | 'duration'
 
 export interface Changeover {
+  workflow?: import("../hmi/linetech").ChangeoverWorkflow | null
   changeover_id: number
   production_line: string
   line_technician: string

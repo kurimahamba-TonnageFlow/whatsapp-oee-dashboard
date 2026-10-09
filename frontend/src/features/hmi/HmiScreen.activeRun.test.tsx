@@ -339,7 +339,7 @@ describe('Hourly Update', () => {
       pallets_produced: '3.75',
     })
     expect(key).toMatch(/^k-[A-Za-z0-9_-]{14,}$/)
-    expect(screen.getAllByText('91.7%')).toHaveLength(2)
+    expect(screen.getByText('Output vs target (all stops)').nextElementSibling).toHaveTextContent('91.7%')
   })
 
   it('accepts zero pallets', async () => {

@@ -94,6 +94,8 @@ app.include_router(runs_router, dependencies=[Depends(require_hmi_access)])
 app.include_router(pulse_capture_router, dependencies=[Depends(require_hmi_access)])
 app.include_router(management_router)
 app.include_router(standards_router)
+from .linetech_api import router as linetech_router
+app.include_router(linetech_router)
 app.include_router(engineering_router)
 app.include_router(hmi_config_router, dependencies=[Depends(require_hmi_access)])
 # /health/ready (database + schema). /health itself stays the static

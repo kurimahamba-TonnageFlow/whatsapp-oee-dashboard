@@ -27,8 +27,9 @@ const CARDS: ManagementCard[] = [
   },
   {
     title: 'Factory setup',
-    description: 'Production lines, machines and fault buttons used by the HMI.',
-    state: 'phase2',
+    description: 'LineTech machine groups, fault categories, planned stops and changeover choices.',
+    state: 'open',
+    to: '/management/linetech',
   },
   {
     title: 'Active runs',

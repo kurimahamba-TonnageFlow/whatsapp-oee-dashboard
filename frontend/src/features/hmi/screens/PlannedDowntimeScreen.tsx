@@ -1,15 +1,17 @@
+import type { LineTechConfig } from '../linetech'
 import { useEffect, useState } from 'react'
 import { formatDuration } from '../progress'
 import type { PlannedDowntimeEvent } from '../types'
 
 interface PlannedDowntimeScreenProps {
+  configuredReasons?: LineTechConfig
   /** Reasons other than Changeover, which has its own action because it
    * also records the structured QC changeover. */
   reasons: string[]
   activeEvent: PlannedDowntimeEvent | null
   isSubmitting: boolean
   errorMessage: string | null
-  onStart: (reason: string) => void
+  onStart: (reason: string, component?: string) => void
   onEnd: () => void
   /** Legacy in-run changeover. Omitted in the End Run -> Changeover flow. */
   onStartChangeover?: () => void
@@ -17,6 +19,7 @@ interface PlannedDowntimeScreenProps {
 }
 
 export function PlannedDowntimeScreen({
+  configuredReasons,
   reasons,
   activeEvent,
   isSubmitting,
@@ -26,6 +29,8 @@ export function PlannedDowntimeScreen({
   onStartChangeover,
   onCancel,
 }: PlannedDowntimeScreenProps) {
+  const [chosen,setChosen] = useState('')
+  const [component,setComponent] = useState('')
   const [confirmingEnd, setConfirmingEnd] = useState(false)
   const [now, setNow] = useState(() => new Date())
 
@@ -40,7 +45,7 @@ export function PlannedDowntimeScreen({
 
     return (
       <div className="hmi-screen hmi-planned-downtime">
-        <h1>Planned Downtime — {activeEvent.reason}</h1>
+        <h1>Planned Downtime — {activeEvent.reason}{activeEvent.component ? ` / ${activeEvent.component}` : ''}</h1>
         <p className="hmi-planned-downtime__elapsed">Elapsed: {formatDuration(elapsedMinutes)}</p>
         <p>Started by {activeEvent.started_by}. Pulse is recording this stop.</p>
 
@@ -90,6 +95,16 @@ export function PlannedDowntimeScreen({
     )
   }
 
+  if (configuredReasons?.enabled) {
+    const items=configuredReasons.planned.filter(p=>p.active)
+    const selected=items.find(p=>p.reason===chosen)
+    return <div className="hmi-screen linetech-screen"><p className="linetech-eyebrow">PLANNED DOWNTIME</p><h1>{selected ? selected.reason : 'Select planned stop'}</h1>
+      <div className="hmi-button-grid">{!selected ? items.map(p=><button key={p.reason} className="linetech-tile linetech-planned" disabled={isSubmitting} onClick={()=>{setChosen(p.reason);setComponent('')}}>{p.reason}</button>) : selected.components.map(c=><button key={c} className="linetech-tile" aria-pressed={component===c} disabled={isSubmitting} onClick={()=>setComponent(c)}>{c}</button>)}</div>
+      {selected && <div className="linetech-confirm"><h2>{selected.reason}{component ? ` / ${component}` : ''}</h2><p>Start the stop timer now. Ending this timer does not record a passed quality or CCP check.</p><button className="hmi-primary-button" disabled={isSubmitting || (!!selected.components.length && !component)} onClick={()=>onStart(selected.reason,component||undefined)}>Confirm planned stop</button></div>}
+      {errorMessage && <p role="alert">{errorMessage}</p>}
+      <button className="hmi-secondary-button" disabled={isSubmitting} onClick={()=>selected?setChosen(''):onCancel()}>Back</button>
+    </div>
+  }
   return (
     <div className="hmi-screen hmi-planned-downtime">
       <h1>Planned Downtime</h1>

@@ -2,6 +2,7 @@
  * and back again afterwards. Only these paths are ever honoured as a
  * post-login destination - never an arbitrary value from history state. */
 export const PROTECTED_DESTINATIONS: Readonly<Record<string, string>> = {
+  '/management/linetech': 'LineTech setup',
   '/management/performance': 'Technician performance',
   '/management/active-runs': 'Active runs',
   '/dashboard': 'Production dashboard',

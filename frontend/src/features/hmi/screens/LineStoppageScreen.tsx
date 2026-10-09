@@ -5,6 +5,7 @@ import { formatDuration } from '../progress'
 import type { LineStoppageKind } from '../types'
 
 export interface ActiveLineStoppage {
+  linetech?: boolean
   stoppageId: number
   productionLine: string
   kind: LineStoppageKind

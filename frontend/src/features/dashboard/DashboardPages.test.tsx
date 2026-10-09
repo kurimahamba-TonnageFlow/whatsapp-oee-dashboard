@@ -476,12 +476,12 @@ describe('QA page', () => {
     expect(within(within(log).getAllByRole('row')[2]).getByText('In progress')).toBeInTheDocument()
   })
 
-  it('says QA status and changeover type are not available yet, instead of inventing them', async () => {
+  it('keeps legacy QA verification and changeover types explicitly unrecorded', async () => {
     await openAt('/dashboard/qa')
     await screen.findByRole('table', { name: 'Changeover log' })
 
-    expect(within(screen.getByRole('region', { name: 'QA status' })).getByText('Data not available yet')).toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: 'Changeovers by type' })).getByText('Data not available yet')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'QA status' })).getByText(/Legacy records have no recorded verification/)).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Changeovers by type' })).getByText(/Not classified:/)).toBeInTheDocument()
     // No invented pass / pending badges.
     expect(screen.queryByText(/^(pass|fail|pending)$/i)).not.toBeInTheDocument()
   })

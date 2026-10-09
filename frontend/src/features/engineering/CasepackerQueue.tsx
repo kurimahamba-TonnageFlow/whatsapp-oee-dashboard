@@ -35,9 +35,9 @@ export function CasepackerQueue({ token, engineerName, onSessionExpired }: Props
     return () => { controller.abort(); latest.current?.abort(); window.clearInterval(timer) }
   }, [refresh])
   return <section aria-label="Casepacker changeovers" className="engineering-casepacker-queue">
-    <h2>Casepacker changeovers</h2>
+    <h2>Changeover Engineering jobs</h2>
     <RecoveryPanel actor={engineerName} token={token} scope="casepacker" onSaved={() => { setRecoveryVersion(n => n + 1); return refresh() }} onSessionExpired={onSessionExpired} />
-    <p>Accept the request, record the work and mark the casepacker ready. Production stays blocked until ready.</p>
+    <p>Accept the linked request, record the work and settings, then confirm Engineering work is complete. Verification and production restart are separate.</p>
     <button className="engineering-secondary-button" onClick={() => { void refresh() }}>Refresh changeovers</button>
     {error && <p role="alert">{error}</p>}
     {!loaded && !error && <p>Loading changeover requests...</p>}
@@ -54,6 +54,7 @@ function CasepackerJob({ item, token, engineerName, onSessionExpired, onSaved }:
   const [confirmReady, setConfirmReady] = useState(false)
   const [confirmHandover, setConfirmHandover] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
+  const generic = !!item.changeover_workflow
   const own = item.engineer === engineerName
   async function act(action: 'accept' | 'update' | 'ready' | 'handover') {
     if (busy) return
@@ -71,18 +72,18 @@ function CasepackerJob({ item, token, engineerName, onSessionExpired, onSaved }:
     } finally { setBusy(false) }
   }
   return <article className="engineering-casepacker-job">
-    <h3>{item.production_line} - Casepacker</h3>
-    <p><strong>{item.ready_at ? 'Ready' : item.engineer ? `Accepted by ${item.engineer}` : 'Waiting for Engineering'}</strong></p>
+    <h3>{item.production_line} - {generic ? `${item.changeover_workflow!.kind} changeover` : "Casepacker"}</h3>
+    <p><strong>{item.cancelled_at ? 'Cancelled' : item.ready_at ? 'Ready' : item.engineer ? `Accepted by ${item.engineer}` : 'Waiting for Engineering'}</strong></p>
     <p>{item.details}</p>
     <p>Requested by {item.requested_by} | {new Date(item.requested_at).toLocaleString('en-GB')}</p>
     {item.updates.map(update => <p key={update.id}>{update.engineer} | {update.action} | {new Date(update.created_at).toLocaleString('en-GB')}{update.note && `: ${update.note}`}</p>)}
-    {!item.ready_at && !item.engineer && <button className="engineering-primary-button" disabled={busy} onClick={() => { void act('accept') }}>Accept changeover</button>}
-    {!item.ready_at && own && <>
-      <label className="engineering-casepacker-note">Casepacker work details
+    {!item.cancelled_at && !item.ready_at && !item.engineer && <button className="engineering-primary-button" disabled={busy} onClick={() => { void act('accept') }}>Accept changeover</button>}
+    {!item.cancelled_at && !item.ready_at && own && <>
+      <label className="engineering-casepacker-note">{generic ? "Work completed and settings changed" : "Casepacker work details"}
         <textarea value={note} maxLength={2000} disabled={busy} onChange={e => setNote(e.target.value)} />
       </label>
       <button className="engineering-secondary-button" disabled={busy || !note.trim()} onClick={() => { void act('update') }}>Add changeover update</button>
-      <button className="engineering-primary-button" disabled={busy || !note.trim()} onClick={() => { setConfirmHandover(false); setConfirmReady(true) }}>Casepacker ready</button>
+      <button className="engineering-primary-button" disabled={busy || !note.trim()} onClick={() => { setConfirmHandover(false); setConfirmReady(true) }}>{generic ? "Engineering work complete" : "Casepacker ready"}</button>
       <button className="engineering-secondary-button" disabled={busy || !note.trim()} onClick={() => { setConfirmReady(false); setConfirmHandover(true) }}>Hand over changeover</button>
       {confirmHandover && <div role="group" aria-label="Confirm changeover handover">
         <p>Save these details and release the job for another engineer. Production stays blocked until the casepacker is ready.</p>
@@ -90,8 +91,8 @@ function CasepackerJob({ item, token, engineerName, onSessionExpired, onSaved }:
         <button className="engineering-secondary-button" disabled={busy} onClick={() => setConfirmHandover(false)}>Keep this job</button>
       </div>}
       {confirmReady && <div role="group" aria-label="Confirm casepacker ready">
-        <p>Confirm the requested format and program are set and the casepacker is ready for the next run.</p>
-        <button className="engineering-primary-button" disabled={busy} onClick={() => { void act('ready') }}>Confirm casepacker ready</button>
+        <p>Confirm the requested configuration and settings are correct. This completes Engineering work only; QA verification and production restart remain separate.</p>
+        <button className="engineering-primary-button" disabled={busy} onClick={() => { void act('ready') }}>{generic ? "Confirm work complete" : "Confirm casepacker ready"}</button>
         <button className="engineering-secondary-button" disabled={busy} onClick={() => setConfirmReady(false)}>Keep working</button>
       </div>}
     </>}

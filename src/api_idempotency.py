@@ -32,8 +32,13 @@ IdempotencyKey = Annotated[
 def build_idempotency(key, action, payload, status_code, to_body):
     """payload: the validated request model. The fingerprint covers the
     action (which includes the path id) and the full request body."""
+    values = payload.model_dump(mode="json")
+    # Additive LineTech fields must not invalidate a pre-upgrade tablet's retry.
+    for field in ("component", "changeover_selection"):
+        if values.get(field) is None:
+            values.pop(field, None)
     canonical = json.dumps(
-        {"action": action, "payload": payload.model_dump(mode="json")},
+        {"action": action, "payload": values},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -45,9 +50,9 @@ def build_idempotency(key, action, payload, status_code, to_body):
     )
 
 
-def run_idempotent_write(operation_name, func, *args, idempotency):
+def run_idempotent_write(operation_name, func, *args, idempotency, **kwargs):
     try:
-        result = func(*args, idempotency=idempotency)
+        result = func(*args, idempotency=idempotency, **kwargs)
 
     except IdempotentReplay as replay:
         return JSONResponse(

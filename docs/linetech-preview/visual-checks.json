@@ -1,0 +1,16 @@
+{
+  "checks": [
+    "LineTech-resolved preset with explicit restart, no required comment",
+    "Engineering escalation acknowledgement",
+    "Planned stop start, component and explicit end; no automatic CCP pass",
+    "Product: configured selection, required Engineering workflow, verification and separate restart setup",
+    "Format: configured selection, required Engineering workflow, verification and separate restart setup",
+    "Size: configured selection, required Engineering workflow, verification and separate restart setup",
+    "Management configuration uses the actual setup component",
+    "tablet-portrait: no horizontal overflow, large touch controls",
+    "mobile: no horizontal overflow, large touch controls",
+    "desktop: no horizontal overflow, large touch controls"
+  ],
+  "browser_errors": [],
+  "data": "Synthetic local fixtures. Actual transaction checks are in linetech_workflow.py."
+}

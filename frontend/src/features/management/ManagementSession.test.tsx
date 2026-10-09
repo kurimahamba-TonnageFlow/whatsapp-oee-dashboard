@@ -132,11 +132,12 @@ describe('Management sign-in', () => {
       '/management/performance',
     )
     expect(screen.getByRole('link', { name: /active runs/i })).toHaveAttribute('href', '/management/active-runs')
-    expect(screen.getAllByText('Open', { exact: true })).toHaveLength(4)
+    expect(screen.getAllByText('Open', { exact: true })).toHaveLength(5)
+    expect(screen.getByRole('link', {name:/factory setup/i})).toHaveAttribute('href','/management/linetech')
     expect(screen.getByRole('link', {name:/production standards/i})).toHaveAttribute('href','/management/production-standards')
 
     // Phase 2 areas: labelled, never links, never focusable.
-    for (const title of ['Factory setup', 'Weekly targets']) {
+    for (const title of ['Weekly targets']) {
       const card = cards.find((item) => within(item).queryByRole('heading', { name: title }))!
       expect(within(card).getByText('Phase 2')).toBeInTheDocument()
       expect(within(card).queryByRole('link')).not.toBeInTheDocument()
