@@ -39,8 +39,9 @@ const CARDS: ManagementCard[] = [
   },
   {
     title: 'Weekly targets',
-    description: 'Site and line weekly tonnage targets.',
-    state: 'phase2',
+    description: 'Factory weekly tonnage, effective week, reporting start day and target notes.',
+    state: 'open',
+    to: '/management/weekly-targets',
   },
 ]
 

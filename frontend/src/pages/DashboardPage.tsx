@@ -1,7 +1,7 @@
+import { Link, useSearchParams } from 'react-router-dom'
 import { ProductionDashboard } from '../features/dashboard/ProductionDashboard'
-
-/** /dashboard - Production. Rendered inside DashboardLayout, behind
- * RequireManagementSession (every dashboard endpoint needs a session). */
-export function DashboardPage() {
-  return <ProductionDashboard />
+import { LiveOperations } from '../features/dashboard/LiveOperations'
+export function DashboardPage(){
+ const [params]=useSearchParams()
+ return params.get('view')==='reports'?<><Link className="pd-button" to="/dashboard">Back to Live Operations</Link><ProductionDashboard/></>:<LiveOperations/>
 }

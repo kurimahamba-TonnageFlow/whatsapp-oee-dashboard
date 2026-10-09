@@ -1,5 +1,6 @@
 import catalogue from '../../../../src/production_catalogue.json'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useProtectedData } from '../management/session/useProtectedData'
 import * as dashboardApi from './api'
 import { ATTENTION, DASHBOARD_LINES, DEFAULT_PERIOD, PERIOD_OPTIONS, RUNS_PAGE_SIZE } from './constants'
@@ -51,7 +52,8 @@ export function ProductionDashboard() {
   // Bumped after a manager corrects a line stop, so the hourly view re-reads.
   const [correctionCount, setCorrectionCount] = useState(0)
   const [period, setPeriod] = useState<DashboardWindow>(DEFAULT_PERIOD)
-  const [line, setLine] = useState('')
+  const [params] = useSearchParams()
+  const [line, setLine] = useState(params.get('line') ?? '')
   const [runFilters, setRunFilters] = useState<RunFilters>(NO_RUN_FILTERS)
   const [tonnageView, setTonnageView] = useState<'week' | 'month'>('week')
 

@@ -230,6 +230,7 @@ function overview(): DashboardOverview {
 }
 
 beforeEach(() => {
+  vi.mocked(dashboardApi.getLive).mockImplementation(() => new Promise(() => {}))
   vi.mocked(managementApi.login).mockResolvedValue(LOGIN)
   vi.mocked(managementApi.logout).mockResolvedValue({ status: 'success', message: 'Logged out.' })
   vi.mocked(dashboardApi.getFilterOptions).mockResolvedValue({
@@ -296,7 +297,7 @@ describe('Dashboard shell', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Operational Intelligence' })).toBeInTheDocument()
 
     fireEvent.click(sideNav().getByRole('link', { name: 'Production' }))
-    expect(await screen.findByRole('heading', { level: 1, name: 'Production' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Live Operations Dashboard' })).toBeInTheDocument()
     expect(sideNav().getByRole('link', { name: 'Production' })).toHaveAttribute('aria-current', 'page')
 
     expect(managementApi.login).toHaveBeenCalledTimes(1)

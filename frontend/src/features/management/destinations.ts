@@ -2,6 +2,7 @@
  * and back again afterwards. Only these paths are ever honoured as a
  * post-login destination - never an arbitrary value from history state. */
 export const PROTECTED_DESTINATIONS: Readonly<Record<string, string>> = {
+  '/management/weekly-targets': 'Weekly targets',
   '/management/linetech': 'LineTech setup',
   '/management/performance': 'Technician performance',
   '/management/active-runs': 'Active runs',
@@ -19,8 +20,10 @@ export interface ProtectedDestination {
 export function protectedDestinationFrom(state: unknown): ProtectedDestination | null {
   if (!state || typeof state !== 'object' || !('from' in state)) return null
   const from = (state as { from: unknown }).from
-  if (typeof from !== 'string' || !Object.hasOwn(PROTECTED_DESTINATIONS, from)) return null
-  return { path: from, label: PROTECTED_DESTINATIONS[from] }
+  if (typeof from !== 'string') return null
+  const path = from.split('?')[0]
+  if (!Object.hasOwn(PROTECTED_DESTINATIONS, path)) return null
+  return { path: from, label: PROTECTED_DESTINATIONS[path] }
 }
 
 /** "14:32" in UK time - the same clock the HMI shows. */

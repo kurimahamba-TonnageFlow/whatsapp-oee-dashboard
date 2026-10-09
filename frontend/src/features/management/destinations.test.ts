@@ -4,6 +4,8 @@ import { formatSessionEnd, protectedDestinationFrom } from './destinations'
 describe('protectedDestinationFrom', () => {
   it.each([
     ['/dashboard', 'Production dashboard'],
+    ['/dashboard?view=reports&line=Rovema', 'Production dashboard'],
+    ['/management/weekly-targets?week=2026-10-05', 'Weekly targets'],
     ['/management/performance', 'Technician performance'],
   ])('accepts the known protected page %s', (from, label) => {
     expect(protectedDestinationFrom({ from })).toEqual({ path: from, label })

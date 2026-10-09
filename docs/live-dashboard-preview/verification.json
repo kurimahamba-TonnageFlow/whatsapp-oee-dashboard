@@ -1,0 +1,46 @@
+[
+  {
+    "name": "desktop-1920",
+    "viewport": [
+      1920,
+      1080
+    ],
+    "width": 1920,
+    "scrollWidth": 1920,
+    "scrollHeight": 1080,
+    "browser_errors": []
+  },
+  {
+    "name": "laptop-1440",
+    "viewport": [
+      1440,
+      900
+    ],
+    "width": 1440,
+    "scrollWidth": 1440,
+    "scrollHeight": 1291,
+    "browser_errors": []
+  },
+  {
+    "name": "tablet-landscape",
+    "viewport": [
+      1180,
+      820
+    ],
+    "width": 1180,
+    "scrollWidth": 1180,
+    "scrollHeight": 1815,
+    "browser_errors": []
+  },
+  {
+    "name": "tablet-portrait",
+    "viewport": [
+      820,
+      1180
+    ],
+    "width": 820,
+    "scrollWidth": 820,
+    "scrollHeight": 3058,
+    "browser_errors": []
+  }
+]

@@ -1,3 +1,4 @@
+import { WeeklyTargets } from '../features/management/WeeklyTargets'
 import { LineTechSetup } from '../features/management/LineTechSetup'
 import { ProductionStandards } from '../features/management/ProductionStandards'
 import { Navigate, Route, Routes } from 'react-router-dom'
@@ -23,6 +24,7 @@ export function AppRoutes() {
       {/* One shared Management session for every page below. */}
       <Route element={<ManagementSessionRoot />}>
         <Route element={<ManagementLayout />}>
+          <Route path="/management/weekly-targets" element={<RequireManagementSession><WeeklyTargets /></RequireManagementSession>} />
           <Route path="/management/linetech" element={<RequireManagementSession><LineTechSetup /></RequireManagementSession>} />
           <Route path="/management" element={<ManagementPage />} />
           <Route path="/management/performance" element={<ManagementPerformancePage />} />

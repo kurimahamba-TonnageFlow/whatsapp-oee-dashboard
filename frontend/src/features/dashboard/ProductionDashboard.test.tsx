@@ -331,7 +331,7 @@ function renderAt(path: string) {
 
 async function openDashboard() {
   vi.mocked(managementApi.login).mockResolvedValue(LOGIN)
-  renderAt('/dashboard')
+  renderAt('/dashboard?view=reports')
   fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: 'Kuri' } })
   fireEvent.change(screen.getByLabelText(/management pin/i), { target: { value: '1234' } })
   fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }))
@@ -344,7 +344,7 @@ function card(label: string) {
 
 describe('Production Dashboard - access', () => {
   it('requires a Management session and never reads dashboard data while signed out', () => {
-    renderAt('/dashboard')
+    renderAt('/dashboard?view=reports')
 
     expect(screen.getByRole('heading', { name: /management sign in/i })).toBeInTheDocument()
     expect(screen.getByText(/sign in to open production dashboard/i)).toBeInTheDocument()

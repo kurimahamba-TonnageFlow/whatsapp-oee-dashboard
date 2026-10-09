@@ -105,4 +105,6 @@ app.include_router(readiness_router)
 # Mounted last, at root, so the explicit routes above always take
 # priority; every other path (including /health and /webhooks/whatsapp)
 # falls through to the existing WhatsApp app unchanged.
+from .live_dashboard_api import router as live_dashboard_router
+app.include_router(live_dashboard_router)
 app.mount("/", whatsapp_app)

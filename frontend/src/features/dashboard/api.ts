@@ -194,3 +194,10 @@ export function reclassifyLineStop(
     idempotencyKey,
   })
 }
+
+export function getLive(token:string,weekStart:string|null,signal?:AbortSignal){
+ return apiClient.get<import('./liveTypes').LiveSnapshot>(`/api/v1/dashboard/live${query({week_start:weekStart})}`,{token,signal})
+}
+export function saveLiveTarget(token:string,payload:{site:'site';week_start:string;week_start_day:number;target_tonnes:number;notes:string}){
+ return apiClient.post('/api/v1/management/live-weekly-target',payload,{token})
+}

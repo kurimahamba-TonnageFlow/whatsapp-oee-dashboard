@@ -518,7 +518,7 @@ def dashboard_get_paths():
 
 
 def test_every_dashboard_route_is_covered():
-    assert len(dashboard_get_paths()) == 20
+    assert len(dashboard_get_paths()) == 21
 
 
 @pytest.mark.parametrize("path", dashboard_get_paths())

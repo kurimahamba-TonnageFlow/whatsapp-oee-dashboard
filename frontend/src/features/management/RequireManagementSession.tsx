@@ -15,7 +15,7 @@ export function RequireManagementSession({ children }: { children: ReactNode }) 
 
   if (!session) {
     // After a deliberate Log Out, land on the plain sign-in screen.
-    const state = endReason === 'signed_out' ? undefined : { from: location.pathname }
+    const state = endReason === 'signed_out' ? undefined : { from: location.pathname + location.search }
     return <Navigate to="/management" replace state={state} />
   }
 

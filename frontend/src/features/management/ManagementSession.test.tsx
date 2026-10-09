@@ -34,6 +34,7 @@ const LOGIN_SUCCESS = {
 
 beforeEach(() => {
   vi.mocked(managementApi.logout).mockResolvedValue({ status: 'success', message: 'Logged out.' })
+  vi.mocked(dashboardApi.getLive).mockReturnValue(new Promise(() => {}))
   vi.mocked(dashboardApi.getOverview).mockReturnValue(new Promise(() => {}))
   vi.mocked(dashboardApi.getFilterOptions).mockReturnValue(new Promise(() => {}))
   vi.mocked(dashboardApi.getHourly).mockReturnValue(new Promise(() => {}))
@@ -132,16 +133,11 @@ describe('Management sign-in', () => {
       '/management/performance',
     )
     expect(screen.getByRole('link', { name: /active runs/i })).toHaveAttribute('href', '/management/active-runs')
-    expect(screen.getAllByText('Open', { exact: true })).toHaveLength(5)
+    expect(screen.getAllByText('Open', { exact: true })).toHaveLength(6)
     expect(screen.getByRole('link', {name:/factory setup/i})).toHaveAttribute('href','/management/linetech')
     expect(screen.getByRole('link', {name:/production standards/i})).toHaveAttribute('href','/management/production-standards')
 
-    // Phase 2 areas: labelled, never links, never focusable.
-    for (const title of ['Weekly targets']) {
-      const card = cards.find((item) => within(item).queryByRole('heading', { name: title }))!
-      expect(within(card).getByText('Phase 2')).toBeInTheDocument()
-      expect(within(card).queryByRole('link')).not.toBeInTheDocument()
-    }
+    expect(screen.getByRole('link', {name:/weekly targets/i})).toHaveAttribute('href','/management/weekly-targets')
     expect(screen.queryByText('Next stage')).not.toBeInTheDocument()
   })
 
@@ -204,7 +200,7 @@ describe('Shared session across protected routes', () => {
     await signInAtManagement()
 
     fireEvent.click(nav().getByRole('link', { name: 'Dashboard' }))
-    expect(await screen.findByRole('heading', { level: 1, name: /^production$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: /^live operations dashboard$/i })).toBeInTheDocument()
 
     fireEvent.click(nav().getByRole('link', { name: 'Performance' }))
     expect(
@@ -227,13 +223,13 @@ describe('Shared session across protected routes', () => {
     await signInAtManagement()
 
     fireEvent.click(screen.getByRole('link', { name: /production dashboard/i }))
-    expect(await screen.findByRole('heading', { level: 1, name: /^production$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: /^live operations dashboard$/i })).toBeInTheDocument()
   })
 })
 
 describe('Protected-route redirect', () => {
   it.each([
-    ['/dashboard', /sign in to open production dashboard/i, /^production$/i],
+    ['/dashboard', /sign in to open production dashboard/i, /^live operations dashboard$/i],
     [
       '/management/performance',
       /sign in to open technician performance/i,
@@ -257,7 +253,7 @@ describe('Protected-route redirect', () => {
   it('stays on the Management home after a direct sign-in at /management', async () => {
     await signInAtManagement()
 
-    expect(screen.queryByRole('heading', { level: 1, name: /^production$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1, name: /^live operations dashboard$/i })).not.toBeInTheDocument()
   })
 })
 
@@ -271,12 +267,12 @@ describe('Session expiry', () => {
     })
     renderAt('/dashboard')
     fillAndSubmit()
-    expect(await screen.findByRole('heading', { level: 1, name: /^production$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: /^live operations dashboard$/i })).toBeInTheDocument()
 
     act(() => {
       vi.advanceTimersByTime(29 * 60 * 1000)
     })
-    expect(screen.getByRole('heading', { level: 1, name: /^production$/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: /^live operations dashboard$/i })).toBeInTheDocument()
 
     act(() => {
       vi.advanceTimersByTime(60 * 1000)
@@ -315,13 +311,13 @@ describe('Logout', () => {
 
     fireEvent.click(nav().getByRole('link', { name: 'Dashboard' }))
     expect(await screen.findByText(/sign in to open production dashboard/i)).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { level: 1, name: /^production$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1, name: /^live operations dashboard$/i })).not.toBeInTheDocument()
   })
 
   it('logs out from a protected page and lands on the plain sign-in screen', async () => {
     await signInAtManagement()
     fireEvent.click(nav().getByRole('link', { name: 'Dashboard' }))
-    await screen.findByRole('heading', { level: 1, name: /^production$/i })
+    await screen.findByRole('heading', { level: 1, name: /^live operations dashboard$/i })
 
     fireEvent.click(screen.getByRole('button', { name: /log out/i }))
 
@@ -388,7 +384,7 @@ describe('Browser refresh', () => {
     // Checking first - never a flash of the sign-in screen.
     expect(screen.getByText(/checking your management session/i)).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /management sign in/i })).not.toBeInTheDocument()
-    expect(await screen.findByRole('heading', { level: 1, name: /^production$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: /^live operations dashboard$/i })).toBeInTheDocument()
     expect(managementApi.getSession).toHaveBeenCalledWith('mgmt-test-token-123', expect.any(AbortSignal))
     expect(managementApi.login).not.toHaveBeenCalled()
   })

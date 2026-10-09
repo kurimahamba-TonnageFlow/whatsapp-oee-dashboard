@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useProtectedData } from '../../management/session/useProtectedData'
 import * as dashboardApi from '../api'
 import { DASHBOARD_LINES, PERIOD_OPTIONS } from '../constants'
@@ -110,7 +111,8 @@ function WorkspaceLink() {
 
 export function EngineeringDashboard() {
   const [period, setPeriod] = useState<DashboardWindow>(DEFAULT_ENGINEERING_PERIOD)
-  const [line, setLine] = useState('')
+  const [searchParams] = useSearchParams()
+  const [line, setLine] = useState(searchParams.get('line') ?? '')
   const [register, setRegister] = useState<RegisterFilters>(NO_REGISTER_FILTERS)
 
   const options = useProtectedData(
@@ -132,8 +134,8 @@ export function EngineeringDashboard() {
       const faults = await dashboardApi.getFaults(
         token,
         {
-          date_from: openNow ? null : localDatePart(classification.window.start_local),
-          date_to: openNow ? null : localDatePart(classification.window.end_local),
+          date_from: searchParams.get('fault') ? null : openNow ? null : localDatePart(classification.window.start_local),
+          date_to: searchParams.get('fault') ? null : openNow ? null : localDatePart(classification.window.end_local),
           production_line: line || null,
           machine: register.machine || null,
           engineer: register.engineer || null,
@@ -243,6 +245,7 @@ interface EngineeringBodyProps {
 }
 
 function EngineeringBody({ data, hasRegisterFilters, openNow, onShowOpen }: EngineeringBodyProps) {
+  const [searchParams] = useSearchParams()
   const { classification, machines, faults } = data
   const open = classification.by_status.open
   const closed = classification.by_status.closed
@@ -323,7 +326,7 @@ function EngineeringBody({ data, hasRegisterFilters, openNow, onShowOpen }: Engi
           )}
         </Panel>
 
-        <Panel title="Fault register">
+        <Panel title="Fault register">{searchParams.get('fault')&&<Notice>Selected fault #{searchParams.get('fault')}. <a href="/dashboard/engineering">Show all faults</a></Notice>}
           {faults.items.length === 0 ? (
             <EmptyState>
               {openNow
@@ -351,7 +354,7 @@ function EngineeringBody({ data, hasRegisterFilters, openNow, onShowOpen }: Engi
               <DataTable
                 label="Fault register"
                 columns={FAULT_COLUMNS}
-                rows={faults.items}
+                rows={searchParams.get('fault') ? faults.items.filter(f=>String(f.downtime_event_id)===searchParams.get('fault')) : faults.items}
                 rowKey={(fault) => fault.downtime_event_id}
               />
             </>
