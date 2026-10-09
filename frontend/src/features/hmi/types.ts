@@ -324,7 +324,26 @@ export interface HourlyUpdatePayload {
   other_loss_reason?: string | null
 }
 
+export interface HourlyProductionReport {
+ target_packs: number | null; actual_packs: number | null; pack_variance: number | null
+ shortfall_packs: number | null; attainment_percent: number | null; period_minutes: number
+ standard_speed_ppm: number | null; planned_minutes: number | null; unplanned_minutes: number | null
+ excluded_minutes: number | null; unexplained_shortfall: number | null; reasons: string[]
+}
 export interface HourlyUpdateResponse {
+  production_report?: HourlyProductionReport | null
+  standard_speed_ppm?: number | null
+  unplanned_downtime_minutes?: number | null
+  estimated_oee?: {
+    quality_basis?: string
+    output_basis?: string
+    warnings?: string[]
+    availability_percent: number | null
+    performance_percent: number | null
+    estimated_quality_percent: number | null
+    estimated_oee_percent: number | null
+    unavailable_reason: string | null
+  }
   loss_review?: import("./api").HourlyLossReview
   status: string
   hourly_update_id: number

@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 try:
     from . import pulse_calculations as calc
+    from . import hourly_performance as performance
     from .factory_time import (
         CLOCK_HOUR,
         clock_hour_label,
@@ -23,6 +24,7 @@ try:
     )
 except ImportError:
     import pulse_calculations as calc
+    import hourly_performance as performance
     from factory_time import (
         CLOCK_HOUR,
         clock_hour_label,
@@ -2726,17 +2728,24 @@ def _operating_changes(cursor, production_run_id):
 
 def _review_period(cursor, run, start, end, pallets, note=None):
     planned = _planned_intervals(cursor, run["id"], start, end)
-    cursor.execute("""SELECT de.opened_at, de.resolved_at FROM public.downtime_events de
+    cursor.execute("""SELECT de.opened_at, de.resolved_at, de.reason FROM public.downtime_events de
         JOIN public.production_runs pr ON pr.id=de.production_run_id
         WHERE pr.production_line=%s AND de.opened_at < %s
         AND (de.resolved_at IS NULL OR de.resolved_at > %s)""", (run["production_line"], end, start))
     faults = cursor.fetchall()
-    return calc.reconciliation_api(calc.reconcile_production(
+    review = calc.reconciliation_api(calc.reconcile_production(
         run.get("standard_speed_ppm"), start, end,
         calc.PackConfig.from_row(run).pallets_to_packs(pallets) if pallets is not None else None,
         [(p["started_at"], p["ended_at"] or end) for p in planned],
         [(f["opened_at"], f["resolved_at"] or end) for f in faults],
         _operating_changes(cursor, run["id"]), note=note))
+    report = performance.period_report(run.get("standard_speed_ppm"), start, end,
+        calc.PackConfig.from_row(run).pallets_to_packs(pallets) if pallets is not None else None,
+        planned, faults, note)
+    review["production_report"] = performance.report_api(report)
+    review["estimated_oee"] = performance.aggregate_oee([report])
+    return review
+
 
 
 def _local_clock(moment):

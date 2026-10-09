@@ -14,8 +14,8 @@
 #   - "Production achievement" = actual / expected output. It is NOT
 #     OEE and is never labelled as such.
 #   - "Estimated OEE" = Availability x Performance x Estimated Quality,
-#     returned only when every factor comes from captured inputs;
-#     otherwise null with an explicit unavailable reason.
+#     trial callers may pass an explicitly labelled provisional quality
+#     assumption; missing required inputs return an unavailable reason.
 #   - Every attribution of lost output to downtime is an ESTIMATE at
 #     the run's own target rate, capped at the measured output gap.
 
@@ -1079,6 +1079,7 @@ def estimate_oee(
     quality_palletised_packs=None,
     quality_xray_packs=None,
     quality_unavailable_reason=None,
+    provisional_quality_percent=None,
 ) -> dict:
     """effective_output_minutes = sum over runs of actual packs / that
     run's target speed, i.e. how many minutes of perfect running the
@@ -1118,7 +1119,10 @@ def estimate_oee(
     palletised = to_decimal(quality_palletised_packs)
     xray = to_decimal(quality_xray_packs)
 
-    if palletised is None or xray is None or xray <= 0 or palletised > xray:
+    assumption = to_decimal(provisional_quality_percent)
+    if palletised is None and xray is None and assumption is not None and ZERO <= assumption <= HUNDRED:
+        quality = assumption / HUNDRED
+    elif palletised is None or xray is None or xray <= 0 or palletised < 0 or palletised > xray:
         result["calculation_status"] = "partial"
         result["unavailable_reason"] = quality_unavailable_reason or (
             "No usable X-ray count covers this output, so Quality - and "
@@ -1127,7 +1131,8 @@ def estimate_oee(
         )
         return result
 
-    quality = palletised / xray
+    else:
+        quality = palletised / xray
     result["estimated_quality_percent"] = as_number(quality * HUNDRED, PERCENT_PLACES)
     result["estimated_oee_percent"] = as_number(
         availability * performance * quality * HUNDRED, PERCENT_PLACES

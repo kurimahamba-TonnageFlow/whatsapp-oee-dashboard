@@ -1456,3 +1456,21 @@ def test_hourly_loss_review_rejects_unknown_technician(monkeypatch):
     response = client.post('/api/v1/runs/5/hourly-loss-review', json={
         'line_technician':'Unknown','hour_start':'2026-01-12T06:00:00Z','pallets_produced':'3'})
     assert response.status_code == 422
+
+
+def test_hourly_oee_uses_authoritative_report():
+    saved = saved_hourly(5, NOW - timedelta(hours=1), Decimal(3))
+    saved["loss_review"] = {"estimated_oee": {"estimated_oee_percent": 98},
+                            "production_report": {"standard_speed_ppm": 120}}
+    result = capture.hourly_update_api(saved)
+    assert result["estimated_oee"]["estimated_oee_percent"] == 98
+    assert result["standard_speed_ppm"] == 120
+
+
+def test_hourly_oee_legacy_replay_does_not_invent_downtime_or_standard():
+    saved = saved_hourly(5, NOW - timedelta(hours=1), Decimal(3))
+    result = capture.hourly_update_api(saved)["estimated_oee"]
+    assert result["availability_percent"] is None
+    assert result["performance_percent"] is None
+    assert result["estimated_oee_percent"] is None
+    assert result["unavailable_reason"] == "Awaiting downtime data"

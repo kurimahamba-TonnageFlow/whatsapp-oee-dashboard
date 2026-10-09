@@ -1,7 +1,7 @@
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { HourlyShareCard } from './HourlyShareCard'
-import { buildShareSummary, renderSummaryImage } from './hourlyShare'
+import { buildShareSummary, outputGauge, oeeGauge, renderSummaryImage } from './hourlyShare'
 import { runState } from '../hmiTestState'
 import type { HourlyUpdateResponse } from '../types'
 vi.mock('./hourlyShare',async importOriginal=>({...await importOriginal<typeof import('./hourlyShare')>(),renderSummaryImage:vi.fn()}))
@@ -13,8 +13,12 @@ it('keeps hourly and cumulative output distinct, uses UK midnight and retains un
  expect(summary.metrics).toContainEqual(['Pallets this hour','6'])
  expect(summary.metrics).toContainEqual(['Pallets this run','22'])
  expect(summary.period).toContain('06 Oct 2026')
- expect(summary.context.join(' ')).toContain('940 packs')
- expect(summary.metrics).toContainEqual(['Output vs target (not OEE)','84.62%'])
+ expect(summary.context.join(' ')).toContain('Awaiting data')
+ expect(summary.achievement).toBe(84.62)
+ expect(summary.identity).not.toMatch(/Run #|Reading #/)
+ expect(summary.target).toBe(7800)
+ expect(summary.actual).toBe(6600)
+ expect(summary.oee).toContainEqual(['Estimated OEE','Unavailable'])
 })
 it('shares a ready PNG file through the native share sheet',async()=>{
  const share=vi.fn().mockResolvedValue(undefined)
@@ -42,4 +46,45 @@ it('retains a screenshot card if canvas export fails',async()=>{
  render(<HourlyShareCard run={runState().run} result={result}/>)
  await screen.findByText(/Image export is unavailable here/)
  expect(screen.getByRole('article',{name:'Screenshot-ready production summary'})).toBeInTheDocument()
+})
+
+it('preserves output above target and flags review instead of presenting it as OEE',()=>{
+ const summary=buildShareSummary(runState().run,{...result,actual_packs:11000,expected_packs:3246.52,production_achievement_percent:338.8},'')
+ expect(summary.achievement).toBe(338.8)
+ expect(summary.context.join(' ')).toContain('Over target')
+ expect(summary.oeeReason).toContain('Awaiting downtime data')
+})
+
+it.each([[0,'#ef5350'],[44.9,'#ef5350'],[45,'#ffa726'],[59.9,'#ffa726'],[60,'#ffa726'],[64.9,'#ffa726'],[65,'#2dd477'],[100,'#2dd477']])('colours %s percent at the correct threshold', (value,color)=>{
+ expect(outputGauge(value).color).toBe(color)
+})
+it('keeps above-target numbers visible while bounding the ring, and treats missing data separately from zero',()=>{
+ expect(outputGauge(338.8)).toMatchObject({fill:100,label:'338.8%'})
+ expect(outputGauge(null)).toMatchObject({fill:0,label:'N/A',color:'#71857b'})
+ expect(outputGauge(0).label).toBe('0.0%')
+})
+
+it('failed sample flags concern without altering quality or the OEE calculation',()=>{
+ const r={...result,estimated_oee:{availability_percent:100,performance_percent:100,estimated_quality_percent:98,estimated_oee_percent:98,unavailable_reason:null,quality_basis:'provisional'}}
+ const passed=buildShareSummary(runState().run,r,'','passed')
+ const failed=buildShareSummary(runState().run,r,'','concern')
+ expect(passed.sample).toBe('Sample check: Passed')
+ expect(failed.sample).toBe('Quality concern - review required')
+ expect(failed.oee).toEqual(passed.oee)
+ expect(failed.oee).toContainEqual(['Quality','98.0% (provisional)'])
+})
+
+it.each([[44.9,'Low','#ef5350'],[45,'Moderate','#ffa726'],[64.9,'Moderate','#ffa726'],[65,'Good','#2dd477'],[98,'Good','#2dd477']])('uses OEE bands at %s', (value,status,color)=>{
+ expect(oeeGauge(value as number)).toMatchObject({status,color})
+})
+it('shows conflicting OEE as a review state without hiding the calculated value',()=>{
+ expect(oeeGauge(332)).toMatchObject({label:'332.0%',fill:0,status:'Review required',color:'#ffa726'})
+ expect(oeeGauge(80,true).status).toBe('Review required')
+ expect(oeeGauge(null)).toMatchObject({label:'N/A',status:'Awaiting data',fill:0})
+})
+it('uses produced divided by expected for the primary ring',async()=>{
+ const r={...result,production_achievement_percent:50,estimated_oee:{availability_percent:100,performance_percent:100,estimated_quality_percent:98,estimated_oee_percent:98,unavailable_reason:null}}
+ render(<HourlyShareCard run={runState().run} result={r}/>)
+ expect(screen.getByRole('img',{name:/Output vs Target: 50.0%. Moderate/})).toBeInTheDocument()
+ await screen.findByRole('link',{name:'Download PNG'})
 })

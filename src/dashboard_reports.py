@@ -28,9 +28,11 @@ from datetime import datetime, timedelta
 
 try:
     from . import pulse_calculations as calc
+    from . import hourly_performance as performance
     from .factory_time import factory_date_of, production_week_start_date, clock_hours_between
 except ImportError:
     import pulse_calculations as calc
+    import hourly_performance as performance
     from factory_time import factory_date_of, production_week_start_date, clock_hours_between
 
 
@@ -71,6 +73,7 @@ class _LineAccumulator:
         self.open_faults = 0
         self.active_run = None
         self.xray_rows = []
+        self.performance_reports = []
         self.reconciliations = []
         self.produced = calc.OutputTotals()
 
@@ -150,6 +153,12 @@ def _accumulate(data, window, now):
                 operating, note=period.get("reported_explanation"))
             if period["start"] < bounds_start or period["end"] > bounds_end:
                 r["limitations"].append("Whole reported period included at window edge; palletised output cannot be split without another reading.")
+            accumulator.performance_reports.append(performance.period_report(
+                run.get("standard_speed_ppm"), period["start"], period["end"],
+                config.pallets_to_packs(period["actual_pallets"]),
+                planned_by_run.get(run_id, []) if "planned" in data else None,
+                faults_by_run.get(run["production_line"], []) if "faults" in data else None,
+                period.get("reported_explanation")))
             accumulator.reconciliations.append(r)
             if r["comparable"]:
                 period["expected_packs"] = r["target_packs"]
@@ -264,16 +273,7 @@ def _quality_inputs(xray_rows):
 
 
 def _oee(accumulator):
-    palletised, xray, reason = _quality_inputs(accumulator.xray_rows)
-    return calc.estimate_oee(
-        accumulator.coverage_minutes,
-        accumulator.attribution.planned_downtime.minutes,
-        accumulator.attribution.unplanned_downtime.minutes,
-        accumulator.effective_output_minutes,
-        quality_palletised_packs=palletised,
-        quality_xray_packs=xray,
-        quality_unavailable_reason=reason,
-    )
+    return performance.aggregate_oee(accumulator.performance_reports)
 
 
 def _active_run_api(active):
@@ -341,6 +341,7 @@ def _site_accumulator(lines):
         site.effective_output_minutes += accumulator.effective_output_minutes
         site.open_faults += accumulator.open_faults
         site.xray_rows.extend(accumulator.xray_rows)
+        site.performance_reports.extend(accumulator.performance_reports)
         site.reconciliations.extend(accumulator.reconciliations)
     return site
 

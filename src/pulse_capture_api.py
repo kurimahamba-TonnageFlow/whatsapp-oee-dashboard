@@ -225,10 +225,23 @@ def hourly_update_api(saved):
     expected = calc.to_decimal(saved["expected_packs"])
     actual = calc.to_decimal(saved["actual_packs"])
 
+    review = saved.get("loss_review") or {}
+    report = review.get("production_report")
+    oee = review.get("estimated_oee") or {
+        "availability_percent": None, "performance_percent": None,
+        "estimated_quality_percent": None, "estimated_oee_percent": None,
+        "unavailable_reason": "Awaiting downtime data", "quality_basis": "provisional",
+        "output_basis": "Palletised packs - provisional output basis", "warnings": [],
+    }
+
     return {
         "status": "success",
         "hourly_update_id": saved["hourly_update_id"],
         "loss_review": saved.get("loss_review"),
+        "estimated_oee": oee,
+        "production_report": report,
+        "standard_speed_ppm": report.get("standard_speed_ppm") if report else None,
+        "unplanned_downtime_minutes": _minutes(review.get("unplanned_minutes")),
         "production_run_id": saved["production_run_id"],
         "production_line": saved["production_line"],
         "hour_start": saved["hour_start"],

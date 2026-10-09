@@ -316,19 +316,19 @@ def test_overview_gap_attribution_is_estimated_capped_and_complete():
     ]
 
 
-def test_overview_estimated_oee_is_partial_without_xray_counts():
+def test_overview_trial_oee_uses_explicit_provisional_quality():
     oee = dashboard_reports.build_overview(window_data(), SHIFT, NOW)["estimated_oee"]
 
-    # Coverage 180 + 60 = 240 min; planned 10, unplanned 10 -> 230 planned production, 220 run.
-    assert oee["availability_percent"] == 95.7
+    # Planned stops are not excluded unless configured: 240 planned, 230 operating minutes.
+    assert oee["availability_percent"] == 95.8
     # Effective minutes 1079/8.4 + 7040/120 = 187.12 over 220 run minutes.
-    assert oee["performance_percent"] == 85.1
-    assert oee["estimated_quality_percent"] is None
-    assert oee["estimated_oee_percent"] is None
-    assert oee["calculation_status"] == "partial"
+    assert oee["performance_percent"] == 81.4
+    assert oee["estimated_quality_percent"] == 98
+    assert oee["estimated_oee_percent"] == 76.4
+    assert oee["quality_basis"] == "provisional"
 
 
-def test_overview_estimated_oee_uses_usable_xray_counts():
+def test_overview_does_not_assign_shift_xray_counts_to_hourly_coverage():
     xray = [{"id": 1, "production_run_id": 1, "production_line": "Rovema", "capture_point": "shift_end",
              "shift": "Day", "count_available": True, "xray_pack_count": 1100, "unavailable_reason": None,
              "palletised_packs": Decimal(1079), "post_xray_pack_difference": Decimal(21),
@@ -337,8 +337,9 @@ def test_overview_estimated_oee_uses_usable_xray_counts():
     lines = lines_by_name(dashboard_reports.build_overview(window_data(xray), SHIFT, NOW))
 
     assert lines["Rovema"]["estimated_oee"]["calculation_status"] == "estimated"
-    assert lines["Rovema"]["estimated_oee"]["estimated_quality_percent"] == 98.1
-    assert lines["GIC"]["estimated_oee"]["calculation_status"] == "partial"
+    assert lines["Rovema"]["estimated_oee"]["estimated_quality_percent"] == 98
+    assert lines["Rovema"]["estimated_oee"]["quality_basis"] == "provisional"
+    assert lines["GIC"]["estimated_oee"]["calculation_status"] == "estimated"
 
 
 def test_invalid_pack_configuration_is_reported_not_silently_used():

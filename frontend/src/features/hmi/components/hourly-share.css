@@ -14,3 +14,28 @@
 .hourly-share__card footer { border-top:1px solid #43584d; padding-top:14px; font-size:.75rem; }
 .hourly-share__image { display:block; width:100%; max-width:540px; height:auto; margin-top:16px; }
 @media(max-width:480px) { .hourly-share__card { padding:18px; } .hourly-share__actions>* { width:100%; justify-content:center; } }
+
+.hourly-share__chart { display:grid; gap:12px; padding:18px; background:#192b26; border-radius:12px; }
+.hourly-share__card h4 { margin:0 0 8px; }
+.hourly-share__chart strong { font-size:1.6rem; color:#b7ed65; }
+.hourly-share__track { background:#2d4038; border-radius:6px; margin-top:6px; overflow:hidden; }
+.hourly-share__bar { height:20px; background:#71857b; }
+.hourly-share__bar--actual { background:#b7ed65; }
+
+.hourly-share__gauge { width:100%; max-width:260px; justify-self:center; }
+.hourly-share__gauge svg { display:block; width:100%; height:auto; }
+.hourly-share__legend { text-align:center; font-size:.8rem; }
+
+.hourly-share__production { margin:0; display:grid; gap:8px; }
+.hourly-share__production div { display:flex; justify-content:space-between; gap:10px; }
+.hourly-share__production dd { margin:0; font-weight:700; color:white; }
+.hourly-share__production dt { font-size:.9rem; }
+.hourly-share__metrics dd { font-size:1.3rem; }
+.hourly-share__oee-total dd { font-size:1.65rem; color:#b7ed65; }
+.hourly-share__assumptions { font-size:.85rem; line-height:1.45; }
+.hourly-share__sample { color:#ffa726; }
+.hourly-share__gauge { max-width:220px; }
+.hourly-share__card { gap:12px; }
+
+.hourly-share__gauge-status { text-align:center; font-weight:750; font-size:1.1rem; }
+.hourly-share__attainment { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; border-top:1px solid #43584d; padding-top:12px; }
