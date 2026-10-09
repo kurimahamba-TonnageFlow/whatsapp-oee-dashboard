@@ -99,7 +99,8 @@ def check_schema_readiness():
              AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='production_runs' AND column_name='standard_version_id')) AS management_standard,
             (to_regclass('public.task_observations') IS NOT NULL
              AND to_regprocedure('public.canonical_product(text)') IS NOT NULL
-             AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='immutable_task_observation' AND NOT tgisinternal)) AS tasks;
+             AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='immutable_task_observation' AND NOT tgisinternal)) AS tasks,
+            to_regprocedure('public.resolve_production_standard(text,numeric,text,text,integer,integer,timestamp with time zone)') IS NOT NULL AS line_weight_standard;
     """
 
     with psycopg.connect(DATABASE_URL, connect_timeout=5) as connection:
@@ -117,6 +118,7 @@ def check_schema_readiness():
         "20261005054638": bool(row.get("fixed_standard")),
         "20261005135527": bool(row.get("management_standard")),
         "20261006021758": bool(row.get("tasks")),
+        "20261008232014": bool(row.get("line_weight_standard")),
     }
 
 

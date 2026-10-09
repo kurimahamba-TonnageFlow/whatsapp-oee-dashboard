@@ -1,3 +1,4 @@
+import './production-standards.css'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiRequestError, apiClient } from '../../api/client'
@@ -5,10 +6,15 @@ import { useManagementSession } from './session/useManagementSession'
 import { useProtectedData } from './session/useProtectedData'
 
 interface StandardVersion {
- id: number; production_line: string; product: string; pack_type: string;
- pack_weight_kg: number; packs_per_case: number; cases_per_pallet: number;
+ id: number; production_line: string; product: string | null; pack_type: string | null;
+ pack_weight_kg: number; packs_per_case: number | null; cases_per_pallet: number | null;
  standard_speed_ppm: number; effective_at: string; recorded_at: string;
  manager_name: string; reason: string;
+}
+
+function localNow() {
+ const now = new Date()
+ return new Date(now.getTime() - now.getTimezoneOffset()*60000).toISOString().slice(0,16)
 }
 
 const PENDING_STANDARD = 'pulse.management.pending-standard.v1'
@@ -44,9 +50,7 @@ export function ProductionStandards() {
   event.preventDefault()
   if (!session || busy) return
   const values = new FormData(event.currentTarget)
-  const body = {production_line:String(values.get('production_line')), product:String(values.get('product')),
-   pack_type:String(values.get('pack_type')), pack_weight_kg:String(values.get('pack_weight_kg')),
-   packs_per_case:Number(values.get('packs_per_case')), cases_per_pallet:Number(values.get('cases_per_pallet')),
+  const body = {production_line:String(values.get('production_line')), pack_weight_kg:String(values.get('pack_weight_kg')),
    standard_speed_ppm:String(values.get('standard_speed_ppm')),
    effective_at:new Date(String(values.get('effective_at'))).toISOString(), reason:String(values.get('reason'))}
   const encoded=JSON.stringify(body)
@@ -59,25 +63,22 @@ export function ProductionStandards() {
   } catch {setMessage('Could not preserve this submission on the device. Nothing new was sent. Check browser storage.')}
 
  }
- return <section className="management-home">
+ return <section className="management-home production-standards">
   <Link to="/management">Back to Management</Link>
   <h1>Production standards</h1>
-  <p>Standards apply to new runs only. Match the line, product and pack configuration used at Start Run. Record a new version to change a standard; history is retained.</p>
+  <p>Set the standard speed for a line and pack weight. It applies to new runs from the date and time below. Existing runs and standard history are retained.</p>
   {pending && <section aria-label="Pending standard submission"><h2>Unconfirmed standard submission</h2><p>Started by {pending.manager}. Retry sends the original values and request key.</p>
    <pre style={{whiteSpace:'pre-wrap'}}>{JSON.stringify(JSON.parse(pending.body),null,2)}</pre>
    <button type="button" disabled={busy} onClick={()=>void submit(pending)}>Confirm pending standard</button></section>}
   <form onSubmit={save}>
-   <fieldset disabled={busy} className="hmi-form-grid"><legend>New standard version</legend>
+   <fieldset disabled={busy} className="standards-grid"><legend>New standard version</legend>
     <label className="hmi-field">Production line<select name="production_line">{['Rovema','GIC','Guill'].map(x=><option key={x}>{x}</option>)}</select></label>
-    <label className="hmi-field">Product<input name="product" required maxLength={120}/></label>
-    <label className="hmi-field">Pack format (same as Start Run)<input name="pack_type" required maxLength={120}/></label>
-    <label className="hmi-field">Nominal pack weight (kg)<input name="pack_weight_kg" type="number" required min="0.0001" step="0.0001"/></label>
-    <label className="hmi-field">Packs per case<input name="packs_per_case" type="number" required min="1" step="1"/></label>
-    <label className="hmi-field">Cases per pallet<input name="cases_per_pallet" type="number" required min="1" step="1"/></label>
-    <label className="hmi-field">Management standard (packs/min)<input name="standard_speed_ppm" type="number" required min="0.0001" max="10000" step="0.0001"/></label>
-    <label className="hmi-field">Effective time (this device's local time)<input name="effective_at" type="datetime-local" required/></label>
+    <label className="hmi-field">Pack weight (kg)<input name="pack_weight_kg" type="number" required min="0.0001" step="0.0001"/></label>
+    <label className="hmi-field">Speed (packs/min)<input name="standard_speed_ppm" type="number" required min="0.0001" max="10000" step="0.0001"/></label>
+    <label className="hmi-field">Date and time changed (local)<input name="effective_at" type="datetime-local" defaultValue={localNow()} required/></label>
+    <label className="hmi-field">Changed by<input value={session?.managerName ?? ''} readOnly/></label>
     <label className="hmi-field">Reason<textarea name="reason" required maxLength={500}/></label>
-    <button className="hmi-primary-button" type="submit">Save standard</button>
+    <button className="standard-save" type="submit">{busy ? 'Saving...' : 'Save'}</button>
    </fieldset>
   </form>
   {message && <p role="status">{message}</p>}
@@ -87,8 +88,9 @@ export function ProductionStandards() {
   {history.isLoading && <p>Loading standards...</p>}
   {history.data?.length===0 && <p>No standards configured. Management must add one before starting a new run.</p>}
   {history.data?.map(r=><article key={r.id}>
-   <h3>Version {r.id}: {r.production_line} / {r.product}</h3>
-   <p>{r.pack_type}, {r.pack_weight_kg} kg, {r.packs_per_case} packs/case, {r.cases_per_pallet} cases/pallet. Standard: {r.standard_speed_ppm} packs/min.</p>
+   <h3>Version {r.id}: {r.production_line} / {r.pack_weight_kg} kg</h3>
+   <p>Speed: {r.standard_speed_ppm} packs/min.</p>
+   {r.product && <p>Earlier configuration: {r.product}, {r.pack_type}, {r.packs_per_case} packs/case, {r.cases_per_pallet} cases/pallet.</p>}
    <p>Effective {new Date(r.effective_at).toLocaleString()}. Recorded {new Date(r.recorded_at).toLocaleString()} by {r.manager_name}. Reason: {r.reason}</p>
   </article>)}
  </section>

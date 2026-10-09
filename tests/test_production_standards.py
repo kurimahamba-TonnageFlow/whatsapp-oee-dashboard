@@ -54,3 +54,19 @@ def test_start_request_does_not_require_technician_standard():
                  product="Rice",pack_weight="1kg",pack_weight_kg=1,packs_per_case=10,
                  pack_type="Pillow",cases_per_pallet=100,pallets_remaining=10,previous_run_completed=0)
     assert StartRunRequest(**payload).target_speed_ppm is None
+
+
+def test_line_weight_only_standard_uses_authenticated_manager(monkeypatch, headers):
+    simple = {key: value for key, value in BODY.items()
+              if key not in ('product', 'pack_type', 'packs_per_case', 'cases_per_pallet')}
+    monkeypatch.setattr(standards_api, 'record_standard',
+        lambda values, manager_name, idempotency=None: {**values, 'manager_name': manager_name})
+    response = client.post('/api/v1/management/production-standards', json=simple, headers=headers)
+    assert response.status_code == 201
+    assert response.json()['product'] is None
+    assert response.json()['manager_name'] == 'Kuri'
+
+
+def test_partial_legacy_configuration_rejected(headers):
+    partial = {key: value for key, value in BODY.items() if key != 'packs_per_case'}
+    assert client.post('/api/v1/management/production-standards', json=partial, headers=headers).status_code == 422

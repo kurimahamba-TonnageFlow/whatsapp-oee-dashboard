@@ -10,15 +10,18 @@ afterEach(()=>{vi.restoreAllMocks();localStorage.clear()})
 it('records management standard with effective time and retries the same request key',async()=>{
  const post=vi.spyOn(apiClient,'post').mockRejectedValueOnce(new Error('Connection lost')).mockResolvedValueOnce({id:7})
  render(<MemoryRouter><ProductionStandards/></MemoryRouter>)
- for (const [label,value] of [[/^Product$/,'Rice'],[/Pack format/,'Pillow'],[/Nominal pack weight/,'1'],[/Packs per case/,'10'],[/Cases per pallet/,'100'],[/Management standard \(packs/,'130'],[/Effective time/,'2026-10-05T06:00'],[/^Reason$/,'Approved baseline']] as const) {
+ for (const [label,value] of [[/Pack weight/,'1'],[/Speed \(packs/,'130'],[/Date and time/,'2026-10-05T06:00'],[/^Reason$/,'Approved baseline']] as const) {
   fireEvent.change(screen.getByLabelText(label),{target:{value}})
  }
- fireEvent.click(screen.getByRole('button',{name:'Save standard'}))
+ fireEvent.click(screen.getByRole('button',{name:'Save'}))
  await screen.findByText('Connection lost')
- fireEvent.click(screen.getByRole('button',{name:'Save standard'}))
+ fireEvent.click(screen.getByRole('button',{name:'Save'}))
  await waitFor(()=>expect(post).toHaveBeenCalledTimes(2))
  expect(post.mock.calls[0]).toEqual(post.mock.calls[1])
  expect(post.mock.calls[0][1]).toMatchObject({standard_speed_ppm:'130',reason:'Approved baseline',effective_at:new Date('2026-10-05T06:00').toISOString()})
+ expect(post.mock.calls[0][1]).not.toHaveProperty('product')
+ expect(screen.getByLabelText('Changed by')).toHaveValue('Kuri')
+ expect(screen.queryByLabelText('Packs per case')).not.toBeInTheDocument()
  expect(post.mock.calls[0][2]).toMatchObject({token:'manager-session'})
  await screen.findByText(/Existing runs keep their standard/)
 })

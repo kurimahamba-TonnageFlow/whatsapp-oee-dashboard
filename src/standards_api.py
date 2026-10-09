@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 try:
     from . import database as db, management_auth
     from .main import line_technicians_by_line
@@ -25,6 +25,8 @@ class StandardConfiguration(BaseModel):
     @field_validator("product", "pack_type", "production_line")
     @classmethod
     def required_text(cls, value):
+        if value is None:
+            return value
         value = value.strip()
         if not value:
             raise ValueError("A value is required.")
@@ -38,6 +40,20 @@ class StandardConfiguration(BaseModel):
         return value
 
 class StandardVersionRequest(StandardConfiguration):
+    # Old clients can still submit a complete configuration. New versions
+    # apply to all products/formats for a line and pack weight.
+    product: str | None = Field(default=None, min_length=1, max_length=120)
+    pack_type: str | None = Field(default=None, min_length=1, max_length=120)
+    packs_per_case: int | None = Field(default=None, gt=0)
+    cases_per_pallet: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def complete_scope(self):
+        fields = (self.product, self.pack_type, self.packs_per_case, self.cases_per_pallet)
+        if any(value is None for value in fields) and not all(value is None for value in fields):
+            raise ValueError("Use line and weight only, or a complete legacy configuration.")
+        return self
+
     standard_speed_ppm: Decimal = Field(gt=0, le=10000, decimal_places=4)
     effective_at: datetime
     reason: str = Field(min_length=1, max_length=500)
@@ -56,11 +72,6 @@ class StandardVersionRequest(StandardConfiguration):
             raise ValueError("A reason is required.")
         return value.strip()
 
-_MATCH = """production_line = %(production_line)s
- AND public.canonical_product(product) = public.canonical_product(%(product)s)
- AND lower(trim(pack_type)) = lower(trim(%(pack_type)s))
- AND pack_weight_kg = %(pack_weight_kg)s AND packs_per_case = %(packs_per_case)s
- AND cases_per_pallet = %(cases_per_pallet)s"""
 
 
 def record_standard(values, manager_name, idempotency=None):
@@ -101,10 +112,12 @@ def resolve_standard(payload: StandardConfiguration):
     # Read-only preview for the HMI. Start Run resolves again at its own timestamp.
     with db.get_database_connection() as connection:
         with connection.cursor(row_factory=db.dict_row) as cursor:
-            cursor.execute("SELECT id,standard_speed_ppm,effective_at FROM public.production_standard_versions WHERE "
-                           + _MATCH + " AND effective_at <= %(at)s ORDER BY effective_at DESC,id DESC LIMIT 1",
-                           {**payload.model_dump(), "at": datetime.now(timezone.utc)})
+            cursor.execute("""SELECT id,standard_speed_ppm,effective_at
+                FROM public.resolve_production_standard(
+                    %(production_line)s, %(pack_weight_kg)s, %(product)s,
+                    %(pack_type)s, %(packs_per_case)s, %(cases_per_pallet)s, %(at)s)""",
+                {**payload.model_dump(), "at": datetime.now(timezone.utc)})
             result = cursor.fetchone()
     if result is None:
-        raise HTTPException(409, "Management must configure a standard for this line, product and pack configuration.")
+        raise HTTPException(409, "Management must configure a standard for this line and pack weight.")
     return result
