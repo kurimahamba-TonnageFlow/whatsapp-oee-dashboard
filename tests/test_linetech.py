@@ -90,3 +90,25 @@ def test_draft_catalogue_uses_existing_fault_ids_without_inventing_presets():
     assert draft['enabled'] is False
     assert draft['groups'][1]['equipment'][0]['categories'][0]['button_ids'] == [7]
     assert len(draft['groups']) == 4
+
+
+def test_sheet_install_requires_management_authentication():
+    assert TestClient(app).post('/api/v1/management/lines/Rovema/linetech/sheet-presets', headers={'Idempotency-Key':'sheet-test'}).status_code == 401
+
+
+def test_sheet_preset_is_scoped_to_rovema():
+    from src.linetech_presets import rovema_preset
+    preset=rovema_preset()
+    assert preset['line']=='Rovema'
+    assert len(preset['machines'])==6
+    assert all(p['active'] for p in preset['planned'])
+    assert not any(p['reason']=='Changeover' for p in preset['planned'])
+
+
+def test_sheet_endpoint_rejects_other_lines():
+    app.dependency_overrides[management_auth.require_management_session]=lambda:'Test manager'
+    try:
+        response=TestClient(app).post('/api/v1/management/lines/GIC/linetech/sheet-presets',headers={'Idempotency-Key':'sheet-test'})
+        assert response.status_code==422
+    finally:
+        app.dependency_overrides.pop(management_auth.require_management_session,None)

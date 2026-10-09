@@ -1,0 +1,141 @@
+{
+  "version": "rovema-2026-10-09",
+  "line": "Rovema",
+  "machines": [
+    {
+      "group": "sbs",
+      "name": "SBS Bagger BV1",
+      "label": "BV1",
+      "categories": {
+        "Film": [
+          "Film torn"
+        ],
+        "Sealing": [
+          "Top seal",
+          "Vertical seal",
+          "Bottom seal"
+        ],
+        "Printer and label": [
+          "Label snapped",
+          "Bag printer",
+          "Ribbon tension"
+        ],
+        "Bag handling": [
+          "Bag crosswise"
+        ]
+      }
+    },
+    {
+      "group": "sbs",
+      "name": "SBS Bagger BV2",
+      "label": "BV2",
+      "categories": {
+        "Film": [
+          "Film torn"
+        ],
+        "Sealing": [
+          "Top seal",
+          "Vertical seal",
+          "Bottom seal"
+        ],
+        "Printer and label": [
+          "Label snapped",
+          "Bag printer",
+          "Ribbon tension"
+        ],
+        "Bag handling": [
+          "Bag crosswise"
+        ]
+      }
+    },
+    {
+      "group": "sbs",
+      "name": "SBS Shared Equipment",
+      "label": "Shared equipment",
+      "categories": {
+        "Discharge and folding": [
+          "SBS discharge belt jam",
+          "Secondary jaw cut-off extractor fault",
+          "Top fold guide fault"
+        ]
+      }
+    },
+    {
+      "group": "xray",
+      "name": "X-ray / Checkweigher",
+      "label": "X-ray / Checkweigher",
+      "categories": {
+        "Faults": [
+          "Machine jam",
+          "CCP check fail"
+        ]
+      }
+    },
+    {
+      "group": "casepacker",
+      "name": "Casepacker",
+      "label": "Case Packer",
+      "categories": {
+        "Faults": [
+          "Magazine pull error",
+          "Product positioning",
+          "Infeed jam",
+          "Suction device",
+          "Cycle-chain overload",
+          "Main discharge conveyor",
+          "Pusher limit position",
+          "Gluing issues",
+          "Printer",
+          "Purge printer"
+        ]
+      }
+    },
+    {
+      "group": "robot",
+      "name": "Robot Palletiser",
+      "label": "Robot Palletiser",
+      "categories": {
+        "Faults": [
+          "Pallet stacker fault",
+          "Pallet outfeed transfer error",
+          "Infeed conveyor not moving",
+          "Incorrect stacking",
+          "Dropping cases",
+          "Safety sensor alarm",
+          "Pallet position",
+          "Wrapper"
+        ]
+      }
+    }
+  ],
+  "planned": [
+    {
+      "reason": "Film Change",
+      "components": [
+        "BV1",
+        "BV2"
+      ],
+      "active": true
+    },
+    {
+      "reason": "Label Change",
+      "components": [
+        "BV1",
+        "BV2"
+      ],
+      "active": true
+    },
+    {
+      "reason": "CCP Check",
+      "components": [
+        "X-ray / Checkweigher"
+      ],
+      "active": true
+    },
+    {
+      "reason": "Break",
+      "components": [],
+      "active": true
+    }
+  ]
+}

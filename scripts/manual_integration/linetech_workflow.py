@@ -150,6 +150,30 @@ def management():
     print('PASS Management configuration, audit record and preserved machine/button identities')
 
 
+
+def sheet_presets():
+    from src.linetech_presets import install_rovema_presets, rovema_preset
+    machine, button = reset()
+    result = install_rovema_presets('Sheet test manager')
+    assert result['config']['enabled'] and not result['already_installed']
+    settings = result['config']
+    assert len([e for g in settings['groups'] for e in g['equipment']]) == 6
+    ids = [b for g in settings['groups'] for e in g['equipment'] for c in e['categories'] for b in c['button_ids']]
+    expected = sum(len(names) for m in rovema_preset()['machines'] for names in m['categories'].values())
+    assert len(ids) == expected and len(set(ids)) == expected
+    assert button in ids  # case-insensitive reuse of Film Torn, no duplicate IDs
+    assert all(p['active'] for p in settings['planned'])
+    assert next(p for p in settings['planned'] if p['reason']=='Label Change')['components']==['BV1','BV2']
+    with connect() as c:
+        assert c.execute('SELECT count(*) AS n FROM machines').fetchone()['n']==6
+        before_audits=c.execute('SELECT count(*) AS n FROM management_audit_log').fetchone()['n']
+        c.execute("UPDATE production_lines SET linetech_config=jsonb_set(linetech_config,'{groups,0,equipment,0,active}','false') WHERE name='Rovema'")
+    again=install_rovema_presets('Sheet test manager')
+    assert again['already_installed'] and not again['config']['groups'][0]['equipment'][0]['active']
+    with connect() as c:
+        assert c.execute('SELECT count(*) AS n FROM management_audit_log').fetchone()['n']==before_audits
+    print('PASS complete sheet preset, all selections, original IDs, audit, and repeat preserving deselection')
+
 def main():
     with psycopg.connect(ADMIN,autocommit=True) as admin:
         admin.execute(sql.SQL('CREATE DATABASE {} TEMPLATE pulse_linetech').format(sql.Identifier(NAME)))
@@ -157,7 +181,7 @@ def main():
         try:
             for kind,value in [('product','Brown Basmati'),('format','1 kg x 8'),('size','0.5')]:
                 scenario(kind,value)
-            cancellation();faults_and_planned();management()
+            cancellation();faults_and_planned();management();sheet_presets()
         finally:
             admin.execute(sql.SQL('DROP DATABASE {} WITH (FORCE)').format(sql.Identifier(NAME)))
 

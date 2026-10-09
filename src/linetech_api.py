@@ -176,3 +176,13 @@ def verify(stoppage_id: int, payload: Verification, idempotency_key: Idempotency
 def cancel(stoppage_id: int, payload: Cancellation, idempotency_key: IdempotencyKey):
     key = build_idempotency(idempotency_key, f"changeover_cancel:{stoppage_id}", payload, 200, lambda x: x)
     return run_idempotent_write("changeover_cancel", update_verification, stoppage_id, payload, True, idempotency=key)
+
+
+@router.post("/management/lines/{line}/linetech/sheet-presets")
+def install_sheet_presets(line: str, idempotency_key: IdempotencyKey,
+                         actor=Depends(management_auth.require_management_session)):
+    from .linetech_presets import install_rovema_presets
+    if line != "Rovema":
+        raise HTTPException(422, "These factory sheets apply to Rovema only.")
+    key = build_idempotency(idempotency_key, f"linetech_sheet:{line}:{actor}", StrictModel(), 200, lambda x:x)
+    return run_idempotent_write("linetech_sheet", install_rovema_presets, actor, idempotency=key)
