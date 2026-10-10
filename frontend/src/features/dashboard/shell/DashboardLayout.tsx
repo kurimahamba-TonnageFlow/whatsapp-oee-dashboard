@@ -127,6 +127,7 @@ export function DashboardLayout() {
               ))}
             </ul>
           </nav>
+          <NavLink to="/" className="pd-button">Home</NavLink>
           <SessionStrip />
         </div>
         <main className="pd-page">

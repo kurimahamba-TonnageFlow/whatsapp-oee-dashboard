@@ -1,0 +1,38 @@
+[
+  {
+    "viewport": "desktop",
+    "width": 1672,
+    "horizontal_overflow": false,
+    "modal_keyboard_focus": "passed",
+    "protected_navigation": "passed",
+    "home_links": "passed",
+    "browser_errors": []
+  },
+  {
+    "viewport": "tablet-landscape",
+    "width": 1180,
+    "horizontal_overflow": false,
+    "modal_keyboard_focus": "passed",
+    "protected_navigation": "passed",
+    "home_links": "passed",
+    "browser_errors": []
+  },
+  {
+    "viewport": "tablet-portrait",
+    "width": 820,
+    "horizontal_overflow": false,
+    "modal_keyboard_focus": "passed",
+    "protected_navigation": "passed",
+    "home_links": "passed",
+    "browser_errors": []
+  },
+  {
+    "viewport": "mobile",
+    "width": 390,
+    "horizontal_overflow": false,
+    "modal_keyboard_focus": "passed",
+    "protected_navigation": "passed",
+    "home_links": "passed",
+    "browser_errors": []
+  }
+]

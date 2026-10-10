@@ -1,7 +1,8 @@
+import { HomePage } from '../features/home/HomePage'
 import { WeeklyTargets } from '../features/management/WeeklyTargets'
 import { LineTechSetup } from '../features/management/LineTechSetup'
 import { ProductionStandards } from '../features/management/ProductionStandards'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
 import { HmiPage } from '../pages/HmiPage'
 import { EngineeringPage } from '../pages/EngineeringPage'
 import { ManagementPage } from '../pages/ManagementPage'
@@ -18,11 +19,11 @@ import { DashboardLayout } from '../features/dashboard/shell/DashboardLayout'
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/hmi" replace />} />
       <Route path="/hmi" element={<HmiPage />} />
       <Route path="/engineering" element={<EngineeringPage />} />
       {/* One shared Management session for every page below. */}
       <Route element={<ManagementSessionRoot />}>
+        <Route path="/" element={<HomePage />} />
         <Route element={<ManagementLayout />}>
           <Route path="/management/weekly-targets" element={<RequireManagementSession><WeeklyTargets /></RequireManagementSession>} />
           <Route path="/management/linetech" element={<RequireManagementSession><LineTechSetup /></RequireManagementSession>} />

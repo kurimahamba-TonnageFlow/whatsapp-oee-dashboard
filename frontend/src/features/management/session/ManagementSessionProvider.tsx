@@ -30,7 +30,7 @@ function revokeHeldToken(tokenRef: RefObject<string | null>) {
 
 /**
  * Owns the Management session shared by /management,
- * /management/performance and /dashboard.
+ * /management/performance, /dashboard and the public Home hub.
  *
  * The session lives in this component's React state and in this tab's
  * sessionStorage (sessionStore.ts), so a browser refresh keeps the
@@ -39,7 +39,7 @@ function revokeHeldToken(tokenRef: RefObject<string | null>) {
  * server; a revoked, expired or pre-restart token goes back to sign-in.
  * The PIN is never kept, nothing reaches localStorage, IndexedDB or a
  * cookie, and closing the tab forgets the token. Leaving the Management
- * area (which unmounts this provider) still ends the session and
+ * area and Home for HMI or Engineering (which unmounts this provider) still ends the session and
  * revokes the token server-side, so a shared factory tablet is never
  * left holding a live Management session.
  *

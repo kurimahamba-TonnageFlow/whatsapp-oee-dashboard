@@ -26,15 +26,10 @@ function renderAt(path: string) {
 }
 
 describe('AppRoutes', () => {
-  it('redirects / to /hmi', () => {
+  it('renders the public Home hub at /', () => {
     renderAt('/')
-
-    // /hmi is the real operator HMI (Stage 4) - its home screen shows
-    // this heading while the config fetch (mocked as never-resolving
-    // above) is pending.
-    expect(
-      screen.getByRole('heading', { name: /tablet sign in/i }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Welcome to TonnageFlow Pulse' })).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'HMI' })[0]).toHaveAttribute('href', '/hmi')
   })
 
   it('renders the real HMI home screen at /hmi', () => {

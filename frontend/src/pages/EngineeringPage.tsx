@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { EngineeringScreen } from '../features/engineering/EngineeringScreen'
 import '../features/engineering/engineering.css'
 
@@ -8,5 +9,5 @@ import '../features/engineering/engineering.css'
  * "Back to HMI" link on the login screen - wrapping it in AppShell's
  * separate header/nav would duplicate both. */
 export function EngineeringPage() {
-  return <EngineeringScreen />
+  return <><nav aria-label="Home"><Link to="/" style={{ display: 'inline-block', padding: '12px 24px' }}>Home</Link></nav><EngineeringScreen /></>
 }

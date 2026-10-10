@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { ApiStatus } from '../components/ApiStatus'
 
 const NAV_ITEMS: ReadonlyArray<{ to: string; label: string; end?: boolean }> = [
+  { to: '/', label: 'Home', end: true },
   { to: '/hmi', label: 'HMI' },
   { to: '/engineering', label: 'Engineering' },
   // `end`: Management is active only on /management itself, not also on

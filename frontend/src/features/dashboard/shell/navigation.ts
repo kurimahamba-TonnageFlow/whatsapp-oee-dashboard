@@ -20,6 +20,7 @@ export const DASHBOARD_PAGES: ReadonlyArray<DashboardNavItem> = [
  * see ManagementSessionProvider), so the Engineering workspace, which
  * has its own sign-in, opens in a new tab. */
 export const OTHER_AREAS: ReadonlyArray<DashboardNavItem> = [
+  { to: '/', label: 'Home', icon: 'H' },
   { to: '/management', label: 'Management', icon: '☰' },
   { to: '/management/performance', label: 'Performance', icon: '↗' },
   { to: '/engineering', label: 'Engineering workspace', icon: '⚙', newTab: true },
